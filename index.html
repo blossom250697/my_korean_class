@@ -689,12 +689,430 @@ function SetupScreen({onDone}) {
   );
 }
 
+
+// ── Страница расписания ───────────────────────────────────────────────────────
+const I18N_SCHED = {
+  ru: {
+    title:'Моё расписание', settingsBtn:'Настройки', resetBtn:'Сбросить', saveImg:'Картинкой', saving:'Сохраняю…',
+    slotsLabel:'Слоты:', slotsHint:(l,b)=>`(${l}ч + ${b}ч перерыв)`,
+    defaultDaysLabel:'Тип дней по умолчанию:', defaultDaysHint:'задаёт шаблон — каждый день можно переназначить',
+    legFree:'🟢 Свободна', legBusy:'🔴 Занята', legWork:'🏢 На работе', legRest:'🌙 Выходной',
+    hint:'Нажмите на день для редактирования',
+    dayTypes:{normal:'обычный',work:'работа',rest:'выходной',yeoncha:'отгул'},
+    dayLabels:{work:'🏢 на работе',rest:'🌙 выходной',yeoncha:'🍃 отгул'},
+    popupTypeSub:'Тип дня', allFree:'🟢 Все свободны', allBusy:'🔴 Все заняты', clear:'✕ Очистить',
+    popupSub:'Нажимайте на слоты', slotFree:'Свободна', slotBusy:'Занята', slotEmpty:'— не отмечено',
+    editTime:'Изменить время', customTimeLabel:'Своё время:', timeFrom:'с', timeTo:'до', saveTime:'Сохранить', resetTime:'По умолчанию',
+    settingsTitle:'⚙️ Настройки слотов', settingsSub:'Время пересчитается автоматически',
+    startTime:'Начало первого занятия', workDay:'Рабочий день:', workDayStart:'Начало', workDayEnd:'Конец',
+    hour:'ч', min:'мин', lessonDur:'Длительность занятия (ч)', breakDur:'Перерыв (ч)', slotsCount:'Кол-во слотов',
+    preview:'Получится:', cancel:'Отмена', apply:'Применить',
+    resetConfirm:'Сбросить расписание этого месяца?', noInternet:'Нужен интернет для первого сохранения.',
+    customWorkTime:'업무 가능 시간 직접 입력', customWorkTimePlaceholder:'예: 10:00~13:00, 15:00~19:00', customWorkTimeSave:'저장', customWorkTimeReset:'자동',
+    repeatWeek:'🔁 Повторить на след. неделю', repeatDone:(n)=>`✓ Скопировано на ${n} дн.`, repeatNone:'Нет слотов для копирования',
+    months:['Январь','Февраль','Март','Апрель','Май','Июнь','Июль','Август','Сентябрь','Октябрь','Ноябрь','Декабрь'],
+    daysShort:['Пн','Вт','Ср','Чт','Пт','Сб','Вс'], daysFull:['Понедельник','Вторник','Среда','Четверг','Пятница','Суббота','Воскресенье'],
+  },
+  en: {
+    title:'My Schedule', settingsBtn:'Settings', resetBtn:'Reset', saveImg:'Save Image', saving:'Saving…',
+    slotsLabel:'Slots:', slotsHint:(l,b)=>`(${l}h + ${b}h break)`,
+    defaultDaysLabel:'Default day types:', defaultDaysHint:'sets template — each day can be overridden',
+    legFree:'🟢 Available', legBusy:'🔴 Busy', legWork:'🏢 At work', legRest:'🌙 Day off',
+    hint:'Click a day to edit',
+    dayTypes:{normal:'normal',work:'work',rest:'off',yeoncha:'leave'},
+    dayLabels:{work:'🏢 at work',rest:'🌙 day off',yeoncha:'🍃 leave'},
+    popupTypeSub:'Day type', allFree:'🟢 All available', allBusy:'🔴 All busy', clear:'✕ Clear',
+    popupSub:'Tap slots', slotFree:'Available', slotBusy:'Busy', slotEmpty:'— not set',
+    editTime:'Edit time', customTimeLabel:'Custom time:', timeFrom:'from', timeTo:'to', saveTime:'Save', resetTime:'Default',
+    settingsTitle:'⚙️ Slot Settings', settingsSub:'Times will be recalculated',
+    startTime:'First lesson start', workDay:'Work hours:', workDayStart:'Start', workDayEnd:'End',
+    hour:'h', min:'min', lessonDur:'Lesson duration (h)', breakDur:'Break (h)', slotsCount:'Slots per day',
+    preview:'Result:', cancel:'Cancel', apply:'Apply',
+    resetConfirm:"Reset this month's schedule?", noInternet:'Internet needed for first save.',
+    customWorkTime:'업무 가능 시간 직접 입력', customWorkTimePlaceholder:'예: 10:00~13:00', customWorkTimeSave:'저장', customWorkTimeReset:'자동',
+    repeatWeek:'🔁 Repeat next week', repeatDone:(n)=>`✓ Copied to ${n} days`, repeatNone:'No slots to copy',
+    months:['January','February','March','April','May','June','July','August','September','October','November','December'],
+    daysShort:['Mon','Tue','Wed','Thu','Fri','Sat','Sun'], daysFull:['Monday','Tuesday','Wednesday','Thursday','Friday','Saturday','Sunday'],
+  },
+  ko: {
+    title:'나의 수업 일정', settingsBtn:'슬롯 설정', resetBtn:'초기화', saveImg:'이미지로 저장', saving:'저장 중…',
+    slotsLabel:'슬롯:', slotsHint:(l,b)=>`(${l}시간 수업 + ${b}시간 휴식)`,
+    defaultDaysLabel:'요일별 기본 유형:', defaultDaysHint:'기본값 설정 — 각 날짜를 개별 변경 가능',
+    legFree:'🟢 수업 가능', legBusy:'🔴 수업 불가', legWork:'🏢 회사 출근', legRest:'🌙 휴무',
+    hint:'날짜를 클릭하여 편집',
+    dayTypes:{normal:'일반',work:'출근',rest:'휴무',yeoncha:'연차'},
+    dayLabels:{work:'🏢 회사 출근',rest:'🌙 휴무',yeoncha:'🍃 연차'},
+    popupTypeSub:'날짜 유형', allFree:'🟢 전부 가능', allBusy:'🔴 전부 불가', clear:'✕ 초기화',
+    popupSub:'슬롯을 탭하세요', slotFree:'가능', slotBusy:'불가', slotEmpty:'— 미설정',
+    editTime:'시간 수정', customTimeLabel:'업무 가능 시간 직접 입력:', timeFrom:'부터', timeTo:'까지', saveTime:'저장', resetTime:'자동',
+    settingsTitle:'⚙️ 슬롯 설정', settingsSub:'시간이 자동 재계산됩니다',
+    startTime:'첫 수업 시작 시간', workDay:'근무 시간:', workDayStart:'시작', workDayEnd:'종료',
+    hour:'시', min:'분', lessonDur:'수업 시간 (시간)', breakDur:'휴식 시간 (시간)', slotsCount:'하루 슬롯 수',
+    preview:'결과:', cancel:'취소', apply:'적용',
+    resetConfirm:'이번 달 일정을 초기화할까요?', noInternet:'처음 저장 시 인터넷이 필요합니다.',
+    customWorkTime:'업무 가능 시간 직접 입력', customWorkTimePlaceholder:'예: 10:00~13:00, 15:00~19:00', customWorkTimeSave:'저장', customWorkTimeReset:'자동',
+    repeatWeek:'🔁 다음 주에 반복', repeatDone:(n)=>`✓ ${n}일에 복사됨`, repeatNone:'복사할 슬롯 없음',
+    months:['1월','2월','3월','4월','5월','6월','7월','8월','9월','10월','11월','12월'],
+    daysShort:['월','화','수','목','금','토','일'], daysFull:['월요일','화요일','수요일','목요일','금요일','토요일','일요일'],
+  },
+};
+const LANG_NAMES = {ru:'🇷🇺 Рус', en:'🇺🇸 Eng', ko:'🇰🇷 한국어'};
+const DEFAULT_DOW_TYPES = {0:'work',1:'normal',2:'normal',3:'work',4:'normal',5:'normal',6:'rest'};
+const DEFAULT_SETTINGS_S = {startHour:11,startMin:0,lessonDuration:3,breakDuration:1,slotsCount:3,workDayStart:'10:00',workDayEnd:'19:00'};
+const KS = {
+  settings:'kt_s3_settings', lang:'kt_s3_lang',
+  dowTypes:(y,m)=>`kt_s3_dow_${y}_${m}`, dayTypes:(y,m)=>`kt_s3_dtype_${y}_${m}`,
+  slotData:(y,m)=>`kt_s3_slots_${y}_${m}`, custTime:(y,m)=>`kt_s3_ctime_${y}_${m}`,
+  workAvail:(y,m)=>`kt_s3_wavail_${y}_${m}`,
+};
+const ls=(k,fb)=>{try{const r=localStorage.getItem(k);return r?JSON.parse(r):fb;}catch{return fb;}};
+const lss=(k,v)=>localStorage.setItem(k,JSON.stringify(v));
+
+function genSlots(s){
+  const sl=[];let h=s.startHour,m=s.startMin||0;
+  for(let i=0;i<s.slotsCount;i++){
+    const fH=h,fM=m,tot=fH*60+fM+s.lessonDuration*60,tH=Math.floor(tot/60),tM=tot%60;
+    const fmt=(hh,mm)=>`${String(hh).padStart(2,'0')}:${String(mm).padStart(2,'0')}`;
+    sl.push({id:`slot${i}`,label:`${fmt(fH,fM)} – ${fmt(tH,tM)}`,fH,fM,tH,tM});
+    const nx=tH*60+tM+s.breakDuration*60;h=Math.floor(nx/60);m=nx%60;
+    if(h>=24)break;
+  }
+  return sl;
+}
+function getDaysS(year,month){const days=[],last=new Date(year,month,0).getDate();for(let d=1;d<=last;d++){const dow=(new Date(year,month-1,d).getDay()+6)%7;days.push({day:d,dow});}return days;}
+function dStrS(y,m,d){return `${y}-${String(m).padStart(2,'0')}-${String(d).padStart(2,'0')}`;}
+function typeColorS(type){
+  if(type==='work')return{bg:'#F1F3F5',border:'#CDD1DA'};
+  if(type==='rest')return{bg:'#F3F0FF',border:'#C4B5FD'};
+  if(type==='yeoncha')return{bg:'#EBFBEE',border:'#86EFAC'};
+  return{bg:'#F7F8FA',border:'#E4E7ED'};
+}
+
+function SchedulePage(){
+  const today=new Date();
+  const [lang,setLang]=useState(()=>ls(KS.lang,'ru'));
+  const [year,setYear]=useState(today.getFullYear());
+  const [month,setMonth]=useState(today.getMonth()+1);
+  const [settings,setSettings]=useState(()=>ls(KS.settings,DEFAULT_SETTINGS_S));
+  const [dowTypes,setDowTypes]=useState(()=>ls(KS.dowTypes(today.getFullYear(),today.getMonth()+1),DEFAULT_DOW_TYPES));
+  const [dayTypes,setDayTypes]=useState(()=>ls(KS.dayTypes(today.getFullYear(),today.getMonth()+1),{}));
+  const [slotData,setSlotData]=useState(()=>ls(KS.slotData(today.getFullYear(),today.getMonth()+1),{}));
+  const [custTime,setCustTime]=useState(()=>ls(KS.custTime(today.getFullYear(),today.getMonth()+1),{}));
+  const [workAvail,setWorkAvail]=useState(()=>ls(KS.workAvail(today.getFullYear(),today.getMonth()+1),{}));
+  const [popup,setPopup]=useState(null);
+  const [showSettings,setShowSettings]=useState(false);
+  const [tempSettings,setTempSettings]=useState(settings);
+  const [editingSlot,setEditingSlot]=useState(null);
+  const [saving,setSaving]=useState(false);
+  const printRef=useRef(null);
+  const popupRef=useRef(null);
+  const t=I18N_SCHED[lang];
+  const slots=React.useMemo(()=>genSlots(settings),[settings]);
+  const TYPE_LIST=lang==='ko'?['normal','work','rest','yeoncha']:['normal','work','rest'];
+
+  useEffect(()=>{
+    setDowTypes(ls(KS.dowTypes(year,month),DEFAULT_DOW_TYPES));
+    setDayTypes(ls(KS.dayTypes(year,month),{}));
+    setSlotData(ls(KS.slotData(year,month),{}));
+    setCustTime(ls(KS.custTime(year,month),{}));
+    setWorkAvail(ls(KS.workAvail(year,month),{}));
+  },[year,month]);
+
+  useEffect(()=>{
+    if(!popup)return;
+    const h=(e)=>{if(popupRef.current&&!popupRef.current.contains(e.target)){setPopup(null);setEditingSlot(null);}};
+    document.addEventListener('mousedown',h);return()=>document.removeEventListener('mousedown',h);
+  },[popup]);
+
+  const prevMonth=()=>{const nm=month===1?12:month-1;setYear(month===1?year-1:year);setMonth(nm);};
+  const nextMonth=()=>{const nm=month===12?1:month+1;setYear(month===12?year+1:year);setMonth(nm);};
+  const changeLang=(l)=>{setLang(l);lss(KS.lang,l);};
+  const getDayType=(ds,dow)=>dayTypes[ds]??dowTypes[dow]??'normal';
+  const setDayType=(ds,type)=>{const nd={...dayTypes};if(type===(dowTypes[popup?.dow]??'normal'))delete nd[ds];else nd[ds]=type;setDayTypes(nd);lss(KS.dayTypes(year,month),nd);};
+  const setDowType=(dow,type)=>{const nd={...dowTypes,[dow]:type};setDowTypes(nd);lss(KS.dowTypes(year,month),nd);};
+  const updateSlots=(nd)=>{setSlotData(nd);lss(KS.slotData(year,month),nd);};
+  const toggleSlot=(ds,slotId)=>{const k=`${ds}_${slotId}`,cur=slotData[k];const next=cur===undefined?'free':cur==='free'?'busy':undefined;const nd={...slotData};if(next===undefined)delete nd[k];else nd[k]=next;updateSlots(nd);};
+  const markDay=(ds,state)=>{const nd={...slotData};slots.forEach(s=>{const k=`${ds}_${s.id}`;if(state===null)delete nd[k];else nd[k]=state;});updateSlots(nd);};
+  const getSlotLabel=(ds,slot)=>{const ct=custTime[`${ds}_${slot.id}`];if(!ct)return slot.label;const f=(h,m)=>`${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}`;return `${f(ct.fH,ct.fM)} – ${f(ct.tH,ct.tM)}`;};
+  const saveCustomTime=(ds,slotId,fH,fM,tH,tM)=>{const nd={...custTime,[`${ds}_${slotId}`]:{fH:+fH,fM:+fM,tH:+tH,tM:+tM}};setCustTime(nd);lss(KS.custTime(year,month),nd);setEditingSlot(null);};
+  const resetCustomTime=(ds,slotId)=>{const nd={...custTime};delete nd[`${ds}_${slotId}`];setCustTime(nd);lss(KS.custTime(year,month),nd);setEditingSlot(null);};
+  const saveWorkAvail=(ds,text)=>{const nd={...workAvail};if(!text.trim())delete nd[ds];else nd[ds]=text.trim();setWorkAvail(nd);lss(KS.workAvail(year,month),nd);};
+  const getNextWeekDates=(ds)=>{const d=new Date(ds);const targets=[];for(let i=7;;i+=7){const next=new Date(d);next.setDate(d.getDate()+i);if(next.getMonth()+1!==month||next.getFullYear()!==year)break;targets.push(next.toISOString().slice(0,10));}return targets;};
+  const repeatNextWeek=(ds)=>{const targets=getNextWeekDates(ds);if(!Object.keys(slotData).some(k=>k.startsWith(ds)))return 0;const nd={...slotData};const ct2={...custTime};targets.forEach(td=>{slots.forEach(s=>{const fk=`${ds}_${s.id}`,tk=`${td}_${s.id}`;if(slotData[fk])nd[tk]=slotData[fk];if(custTime[fk])ct2[tk]=custTime[fk];});});setSlotData(nd);lss(KS.slotData(year,month),nd);setCustTime(ct2);lss(KS.custTime(year,month),ct2);return targets.length;};
+  const repeatWorkAvail=(ds)=>{const text=workAvail[ds];if(!text)return 0;const targets=getNextWeekDates(ds);if(!targets.length)return 0;const nd={...workAvail};targets.forEach(td=>{nd[td]=text;});setWorkAvail(nd);lss(KS.workAvail(year,month),nd);return targets.length;};
+  const applySettings=()=>{const ns={...tempSettings,startHour:+tempSettings.startHour,startMin:+(tempSettings.startMin||0),lessonDuration:+tempSettings.lessonDuration,breakDuration:+tempSettings.breakDuration,slotsCount:+tempSettings.slotsCount,workDayStart:tempSettings.workDayStart||'10:00',workDayEnd:tempSettings.workDayEnd||'19:00'};setSettings(ns);lss(KS.settings,ns);setShowSettings(false);};
+  const saveImage=async()=>{setSaving(true);try{if(!window.html2canvas){await new Promise((res,rej)=>{const s=document.createElement('script');s.src='https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js';s.onload=res;s.onerror=rej;document.head.appendChild(s);});}const canvas=await window.html2canvas(printRef.current,{scale:2,backgroundColor:'#fff',useCORS:true});const a=document.createElement('a');a.download=`${t.months[month-1]}_${year}.png`;a.href=canvas.toDataURL('image/png');a.click();}catch{alert(t.noInternet);}setSaving(false);};
+  const resetMonth=()=>{if(!confirm(t.resetConfirm))return;updateSlots({});setDayTypes({});lss(KS.dayTypes(year,month),{});};
+
+  const days=getDaysS(year,month);const weeks=[];let week=Array(days[0].dow).fill(null);
+  days.forEach(d=>{week.push(d);if(d.dow===6){weeks.push(week);week=[];}});
+  if(week.length){while(week.length<7)week.push(null);weeks.push(week);}
+
+  const typeBtn=(type,active,onClick)=>(
+    <button key={type} onClick={onClick} style={{display:'flex',alignItems:'center',gap:5,padding:'7px 12px',borderRadius:8,border:`1.5px solid ${active?'var(--blue)':'var(--border2)'}`,background:active?'var(--blue-lt)':'var(--bg)',fontSize:13,fontWeight:600,cursor:'pointer',color:active?'var(--blue)':'var(--ink2)'}}>
+      {type==='normal'?'📅':type==='work'?'🏢':type==='rest'?'🌙':'🍃'} {t.dayTypes[type]}
+    </button>
+  );
+
+  return (
+    <div className="page">
+      <div className="page-header">
+        <div className="page-title"><span className="ti">🗓</span><h1>{t.title}</h1></div>
+        <div className="page-controls">
+          <div style={{display:'flex',gap:3,background:'var(--bg)',border:'1.5px solid var(--border)',borderRadius:9,padding:3}}>
+            {Object.entries(LANG_NAMES).map(([c,l])=><button key={c} onClick={()=>changeLang(c)} style={{padding:'5px 11px',borderRadius:6,border:'none',fontSize:12.5,fontWeight:600,cursor:'pointer',background:lang===c?'var(--blue)':'transparent',color:lang===c?'#fff':'var(--ink3)'}}>{l}</button>)}
+          </div>
+          <button className="btn btn-ghost" onClick={()=>{setTempSettings(settings);setShowSettings(true);}}>⚙️ {t.settingsBtn}</button>
+          <button className="btn btn-ghost" onClick={resetMonth}>↺ {t.resetBtn}</button>
+          <button className="btn btn-primary" onClick={saveImage} disabled={saving}>📷 {saving?t.saving:t.saveImg}</button>
+        </div>
+      </div>
+
+      {/* Слоты */}
+      <div style={{display:'flex',alignItems:'center',gap:8,flexWrap:'wrap',marginBottom:12}}>
+        <span style={{fontSize:13,fontWeight:700,color:'var(--ink2)'}}>{t.slotsLabel}</span>
+        {slots.map(s=><span key={s.id} style={{background:'var(--blue-lt)',color:'var(--blue)',fontSize:12,fontWeight:700,padding:'4px 10px',borderRadius:7,border:'1.5px solid #A5B4FC'}}>⏰ {s.label}</span>)}
+        <span style={{fontSize:12,color:'var(--ink3)'}}>{t.slotsHint(settings.lessonDuration,settings.breakDuration)}</span>
+      </div>
+
+      {/* Шаблон дней */}
+      <div style={{display:'flex',alignItems:'flex-start',gap:12,flexWrap:'wrap',marginBottom:12,padding:'12px 16px',background:'var(--surface)',border:'1.5px solid var(--border)',borderRadius:'var(--radius)',boxShadow:'var(--shadow)'}}>
+        <span style={{fontSize:13,fontWeight:700,color:'var(--ink2)',paddingTop:4}}>{t.defaultDaysLabel}</span>
+        <div style={{display:'flex',gap:6,flexWrap:'wrap'}}>
+          {t.daysShort.map((d,dow)=>(
+            <div key={dow} style={{display:'flex',flexDirection:'column',alignItems:'center',gap:3}}>
+              <div style={{fontSize:11,fontWeight:800,color:'var(--ink2)',textTransform:'uppercase'}}>{d}</div>
+              <select value={dowTypes[dow]??'normal'} onChange={e=>setDowType(dow,e.target.value)} style={{fontSize:11,fontWeight:600,padding:'4px 5px',borderRadius:6,border:'1.5px solid var(--border2)',background:'var(--bg)',cursor:'pointer',outline:'none'}}>
+                {TYPE_LIST.map(tp=><option key={tp} value={tp}>{t.dayTypes[tp]}</option>)}
+              </select>
+            </div>
+          ))}
+        </div>
+        <span style={{fontSize:11,color:'var(--ink3)',paddingTop:6}}>{t.defaultDaysHint}</span>
+      </div>
+
+      {/* Легенда */}
+      <div style={{display:'flex',gap:14,flexWrap:'wrap',fontSize:13,marginBottom:16,alignItems:'center'}}>
+        <span style={{fontWeight:600,color:'var(--green)'}}>{t.legFree}</span>
+        <span style={{fontWeight:600,color:'var(--red)'}}>{t.legBusy}</span>
+        <span style={{fontWeight:600,color:'#495057'}}>{t.legWork}</span>
+        <span style={{fontWeight:600,color:'var(--purple)'}}>{t.legRest}</span>
+        {lang==='ko'&&<span style={{fontWeight:600,color:'var(--green)'}}>🍃 연차</span>}
+        <span style={{marginLeft:'auto',fontSize:12,color:'var(--blue)',background:'var(--blue-lt)',padding:'5px 11px',borderRadius:7,fontWeight:500}}>{t.hint}</span>
+      </div>
+
+      {/* Календарь */}
+      <div style={{background:'#fff',border:'1.5px solid var(--border)',borderRadius:'var(--radius)',padding:20,boxShadow:'var(--shadow)'}} ref={printRef}>
+        <div style={{display:'flex',alignItems:'center',justifyContent:'center',gap:16,marginBottom:14}}>
+          <button className="btn-icon" onClick={prevMonth}>◀</button>
+          <h2 style={{fontSize:18,fontWeight:800,letterSpacing:'-.4px',minWidth:200,textAlign:'center'}}>{t.months[month-1]} {year}</h2>
+          <button className="btn-icon" onClick={nextMonth}>▶</button>
+        </div>
+        <div style={{display:'grid',gridTemplateColumns:'repeat(7,1fr)',gap:4,marginBottom:4}}>
+          {t.daysShort.map((d,dow)=><div key={d} style={{textAlign:'center',fontSize:11,fontWeight:800,color:dowTypes[dow]==='work'?'#868E96':dowTypes[dow]==='rest'?'var(--purple)':'var(--ink2)',textTransform:'uppercase',letterSpacing:.4,padding:'4px 0'}}>{d}</div>)}
+        </div>
+        <div style={{display:'flex',flexDirection:'column',gap:4}}>
+          {weeks.map((week,wi)=>(
+            <div key={wi} style={{display:'grid',gridTemplateColumns:'repeat(7,1fr)',gap:4}}>
+              {week.map((dayObj,di)=>{
+                if(!dayObj)return<div key={di}/>;
+                const ds=dStrS(year,month,dayObj.day);
+                const type=getDayType(ds,dayObj.dow);
+                const col=typeColorS(type);
+                const isToday=dayObj.day===today.getDate()&&month===today.getMonth()+1&&year===today.getFullYear();
+
+                // Вычисляем업무 대응 가능 для обычных дней в корейском
+                let previewContent=null;
+                if(type==='normal'){
+                  if(lang==='ko'&&workAvail[ds]){
+                    previewContent=<div style={{fontSize:11,fontWeight:700,padding:'2px 5px',borderRadius:4,background:'#EEF2FF',color:'var(--blue)',lineHeight:1.4}}>업무 대응 가능: {workAvail[ds]}</div>;
+                  } else if(lang==='ko'&&dayObj.dow===5){
+                    previewContent=<div style={{fontSize:11,fontWeight:700,padding:'2px 5px',borderRadius:4,background:'#FFF9DB',color:'var(--amber)',border:'1px solid #FBBF24'}}>수업 있음 (한국어)</div>;
+                  } else if(lang==='ko'){
+                    const toMin=s=>{const[h,m]=s.split(':').map(Number);return h*60+(m||0);};
+                    const toStr=m=>`${String(Math.floor(m/60)).padStart(2,'0')}:${String(m%60).padStart(2,'0')}`;
+                    const wS=toMin(settings.workDayStart||'10:00'),wE=toMin(settings.workDayEnd||'19:00');
+                    const lessons=slots.filter(s=>slotData[`${ds}_${s.id}`]).map(s=>{const lbl=getSlotLabel(ds,s);const[fp,tp]=lbl.split('–');return{f:toMin(fp.trim()),t:toMin(tp.trim())};}).filter(r=>r.f<wE&&r.t>wS).sort((a,b)=>a.f-b.f);
+                    const free=[];let cur=wS;
+                    lessons.forEach(r=>{const start=Math.max(r.f,wS);if(start>cur)free.push({f:cur,t:start});cur=Math.max(cur,Math.min(r.t,wE));});
+                    if(cur<wE)free.push({f:cur,t:wE});
+                    const ko=v=>v.replace(':00','시').replace(':30','시 30분');
+                    const freeText=free.map(w=>`${ko(toStr(w.f))}~${ko(toStr(w.t))}`).join(', ');
+                    previewContent=<div style={{fontSize:10,fontWeight:700,padding:'2px 5px',borderRadius:4,background:'#EEF2FF',color:'var(--blue)',lineHeight:1.4,whiteSpace:'normal'}}>업무 대응 가능: {freeText}</div>;
+                  } else {
+                    const pills=slots.map(s=>{const st=slotData[`${ds}_${s.id}`];if(!st)return null;const lbl=getSlotLabel(ds,s);return<div key={s.id} style={{fontSize:11,fontWeight:700,padding:'2px 5px',borderRadius:4,background:st==='free'?'#d3f9d8':'#ffe3e3',color:st==='free'?'var(--green)':'var(--red)'}}>{lbl.split('–')[0].trim()}</div>;}).filter(Boolean);
+                    if(pills.length)previewContent=<div style={{display:'flex',flexDirection:'column',gap:3}}>{pills}</div>;
+                  }
+                }
+
+                return(
+                  <div key={di} onClick={()=>setPopup({day:dayObj.day,dow:dayObj.dow,ds})}
+                    style={{height:110,borderRadius:8,border:`1.5px solid ${isToday?'var(--blue)':col.border}`,padding:'7px 6px',cursor:'pointer',background:col.bg,display:'flex',flexDirection:'column',gap:4,overflow:'hidden',outline:isToday?'2.5px solid var(--blue)':undefined,outlineOffset:isToday?1:undefined,transition:'transform .12s'}}
+                    onMouseEnter={e=>e.currentTarget.style.transform='scale(1.02)'}
+                    onMouseLeave={e=>e.currentTarget.style.transform='scale(1)'}
+                  >
+                    <div style={{display:'flex',alignItems:'center',justifyContent:'space-between'}}>
+                      <span style={{fontSize:16,fontWeight:800,color:isToday?'var(--blue)':type!=='normal'?'var(--ink3)':'var(--ink)'}}>{dayObj.day}</span>
+                      {dayTypes[ds]!==undefined&&<span style={{fontSize:10,color:'var(--blue)',opacity:.6}}>✦</span>}
+                    </div>
+                    {type==='work'&&<span style={{fontSize:12,fontWeight:600,color:'#868E96',lineHeight:1.3}}>{t.dayLabels.work}</span>}
+                    {type==='rest'&&<span style={{fontSize:13,fontWeight:700,color:'var(--purple)'}}>{t.dayLabels.rest}</span>}
+                    {type==='yeoncha'&&<span style={{fontSize:13,fontWeight:700,color:'var(--green)'}}>{t.dayLabels.yeoncha}</span>}
+                    {type==='normal'&&previewContent}
+                  </div>
+                );
+              })}
+            </div>
+          ))}
+        </div>
+        <div style={{marginTop:14,paddingTop:12,borderTop:'1px solid var(--border)',fontSize:11.5,color:'var(--ink3)',textAlign:'center'}}>
+          🟢 {lang==='ko'?'수업 가능':lang==='en'?'Available':'Свободна'} · 🔴 {lang==='ko'?'수업 불가':lang==='en'?'Busy':'Занята'} · 🏢 {lang==='ko'?'회사 출근':lang==='en'?'At work':'На работе'} · 🌙 {lang==='ko'?'휴무':lang==='en'?'Day off':'Выходной'}
+        </div>
+      </div>
+
+      {/* Попап дня */}
+      {popup&&(()=>{const popupIsYeoncha=dayTypes[popup.ds]==='yeoncha'; return(
+        <div style={{position:'fixed',inset:0,background:'rgba(0,0,0,.4)',zIndex:200,display:'flex',alignItems:'center',justifyContent:'center',padding:20}}>
+          <div ref={popupRef} style={{background:'#fff',borderRadius:14,width:'100%',maxWidth:400,maxHeight:'90vh',overflowY:'auto',boxShadow:'var(--shadow-md)',padding:22}}>
+            <div style={{display:'flex',alignItems:'flex-start',justifyContent:'space-between',marginBottom:14,gap:10}}>
+              <div>
+                <div style={{fontSize:16,fontWeight:800}}>{t.daysFull[popup.dow]}, {popup.day} {t.months[month-1]}</div>
+                <div style={{fontSize:12,color:'var(--ink3)',marginTop:3}}>{t.popupTypeSub} · {t.popupSub}</div>
+              </div>
+              <button className="btn-icon" onClick={()=>{setPopup(null);setEditingSlot(null);}}>✕</button>
+            </div>
+            {/* Тип дня */}
+            <div style={{display:'flex',gap:6,flexWrap:'wrap',marginBottom:4}}>
+              {TYPE_LIST.map(type=>typeBtn(type,getDayType(popup.ds,popup.dow)===type,()=>setDayType(popup.ds,type)))}
+              {dayTypes[popup.ds]!==undefined&&<button onClick={()=>{const nd={...dayTypes};delete nd[popup.ds];setDayTypes(nd);lss(KS.dayTypes(year,month),nd);}} style={{padding:'7px 12px',borderRadius:8,border:'1.5px dashed var(--border2)',background:'var(--bg)',fontSize:12,fontWeight:600,cursor:'pointer',color:'var(--ink3)'}}>↺ сброс</button>}
+            </div>
+
+            {/* Слоты для обычного дня */}
+            {getDayType(popup.ds,popup.dow)==='normal'&&(<>
+              <div style={{display:'flex',gap:6,flexWrap:'wrap',marginBottom:10,marginTop:12}}>
+                <button onClick={()=>markDay(popup.ds,'free')} style={{padding:'6px 11px',borderRadius:7,border:'1.5px solid var(--green)',background:'var(--green-lt)',fontSize:12.5,fontWeight:700,cursor:'pointer',color:'var(--green)'}}>{t.allFree}</button>
+                <button onClick={()=>markDay(popup.ds,'busy')} style={{padding:'6px 11px',borderRadius:7,border:'1.5px solid var(--red)',background:'var(--red-lt)',fontSize:12.5,fontWeight:700,cursor:'pointer',color:'var(--red)'}}>{t.allBusy}</button>
+                <button onClick={()=>markDay(popup.ds,null)} style={{padding:'6px 11px',borderRadius:7,border:'1.5px solid var(--border2)',background:'var(--bg)',fontSize:12.5,fontWeight:700,cursor:'pointer',color:'var(--ink2)'}}>{t.clear}</button>
+              </div>
+              <div style={{display:'flex',flexDirection:'column',gap:6}}>
+                {slots.map(slot=>{
+                  const st=slotData[`${popup.ds}_${slot.id}`];
+                  const lbl=getSlotLabel(popup.ds,slot);
+                  const isCustom=!!custTime[`${popup.ds}_${slot.id}`];
+                  const isEditing=editingSlot?.slotId===slot.id;
+                  const ct=custTime[`${popup.ds}_${slot.id}`];
+                  const defFrom=ct?`${String(ct.fH).padStart(2,'0')}:${String(ct.fM).padStart(2,'0')}`:slot.label.split('–')[0].trim();
+                  const defTo  =ct?`${String(ct.tH).padStart(2,'0')}:${String(ct.tM).padStart(2,'0')}`:slot.label.split('–')[1].trim();
+                  return(
+                    <div key={slot.id}>
+                      <div onClick={()=>!isEditing&&toggleSlot(popup.ds,slot.id)}
+                        style={{display:'flex',alignItems:'center',gap:10,padding:'12px 14px',borderRadius:9,border:`1.5px solid ${st==='free'?'#86EFAC':st==='busy'?'#FCA5A5':'var(--border)'}`,cursor:'pointer',background:st==='free'?'var(--green-lt)':st==='busy'?'var(--red-lt)':'var(--bg)',transition:'background .12s'}}>
+                        <span style={{fontSize:13.5,fontWeight:800,flex:1}}>⏰ {lbl}{isCustom&&<span style={{fontSize:10,color:'var(--purple)',background:'var(--purple-lt)',padding:'1px 5px',borderRadius:4,fontWeight:700,marginLeft:5}}>✦</span>}</span>
+                        <span style={{fontSize:12.5,display:'flex',alignItems:'center',gap:4,minWidth:80}}>
+                          {st==='free'&&<><span style={{color:'var(--green)'}}>✓</span><span style={{color:'var(--green)',fontWeight:700}}>{t.slotFree}</span></>}
+                          {st==='busy'&&<><span style={{color:'var(--red)'}}>✕</span><span style={{color:'var(--red)',fontWeight:700}}>{t.slotBusy}</span></>}
+                          {!st&&<span style={{color:'var(--ink3)'}}>{t.slotEmpty}</span>}
+                        </span>
+                        <button onClick={e=>{e.stopPropagation();setEditingSlot(isEditing?null:{slotId:slot.id,from:defFrom,to:defTo});}} style={{width:28,height:28,borderRadius:6,border:'none',background:'transparent',cursor:'pointer',fontSize:14,opacity:isEditing?1:.5}}>✏️</button>
+                      </div>
+                      {isEditing&&(
+                        <div onClick={e=>e.stopPropagation()} style={{background:'var(--purple-lt)',border:'1.5px solid #C4B5FD',borderTop:'none',borderRadius:'0 0 9px 9px',padding:'11px 14px',display:'flex',flexDirection:'column',gap:9}}>
+                          <div style={{fontSize:11,fontWeight:700,color:'var(--purple)',textTransform:'uppercase',letterSpacing:.4}}>{t.customTimeLabel}</div>
+                          <div style={{display:'flex',alignItems:'center',gap:8,flexWrap:'wrap'}}>
+                            <span style={{fontSize:12,fontWeight:600,color:'var(--ink3)'}}>{t.timeFrom}</span>
+                            <input type="time" value={editingSlot.from} onChange={e=>setEditingSlot(p=>({...p,from:e.target.value}))} style={{padding:'6px 10px',border:'1.5px solid #C4B5FD',borderRadius:7,fontSize:14,fontWeight:700,outline:'none',background:'#fff',width:120}}/>
+                            <span style={{fontSize:12,fontWeight:600,color:'var(--ink3)'}}>{t.timeTo}</span>
+                            <input type="time" value={editingSlot.to} onChange={e=>setEditingSlot(p=>({...p,to:e.target.value}))} style={{padding:'6px 10px',border:'1.5px solid #C4B5FD',borderRadius:7,fontSize:14,fontWeight:700,outline:'none',background:'#fff',width:120}}/>
+                          </div>
+                          <div style={{display:'flex',gap:8,justifyContent:'flex-end'}}>
+                            <button onClick={()=>resetCustomTime(popup.ds,slot.id)} style={{padding:'6px 11px',borderRadius:7,border:'1.5px solid var(--border2)',background:'var(--bg)',fontSize:12.5,fontWeight:700,cursor:'pointer',color:'var(--ink2)'}}>↺ {t.resetTime}</button>
+                            <button onClick={()=>{const[fH,fM]=editingSlot.from.split(':').map(Number);const[tH,tM]=editingSlot.to.split(':').map(Number);saveCustomTime(popup.ds,slot.id,fH,fM,tH,tM);}} style={{padding:'6px 11px',borderRadius:7,border:'1.5px solid var(--green)',background:'var(--green-lt)',fontSize:12.5,fontWeight:700,cursor:'pointer',color:'var(--green)'}}>✓ {t.saveTime}</button>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+              {/* Кастомное время (корейский) */}
+              {lang==='ko'&&(
+                <div style={{marginTop:12,padding:'12px 14px',background:'#F0FFF4',border:'1.5px solid #86EFAC',borderRadius:10,display:'flex',flexDirection:'column',gap:7}}>
+                  <div style={{fontSize:12.5,fontWeight:700,color:'var(--green)'}}>{t.customWorkTime}</div>
+                  <div style={{display:'flex',gap:8,alignItems:'center'}}>
+                    <input type="text" className="search-input" style={{flex:1,width:'auto'}} placeholder={t.customWorkTimePlaceholder} defaultValue={workAvail[popup.ds]||''} key={popup.ds} onChange={e=>saveWorkAvail(popup.ds,e.target.value)}/>
+                    {workAvail[popup.ds]&&<button onClick={()=>saveWorkAvail(popup.ds,'')} style={{padding:'6px 10px',borderRadius:7,border:'1.5px solid #86EFAC',background:'#fff',color:'var(--green)',fontSize:12,fontWeight:700,cursor:'pointer'}}>✕ {t.customWorkTimeReset}</button>}
+                  </div>
+                  {workAvail[popup.ds]&&<button onClick={()=>{const n=repeatWorkAvail(popup.ds);alert(n>0?t.repeatDone(n):t.repeatNone);}} style={{width:'100%',padding:'7px 12px',borderRadius:8,border:'1.5px dashed #86EFAC',background:'#fff',color:'var(--green)',fontSize:13,fontWeight:700,cursor:'pointer'}}>🔁 {t.repeatWeek}</button>}
+                  <div style={{fontSize:11,color:'var(--ink3)'}}>비워두면 자동 계산됩니다</div>
+                </div>
+              )}
+              {/* Повторить */}
+              <button onClick={()=>{const n=repeatNextWeek(popup.ds);alert(n>0?t.repeatDone(n):t.repeatNone);}} style={{width:'100%',marginTop:10,padding:'10px 14px',borderRadius:9,border:'1.5px dashed #A5B4FC',background:'var(--blue-lt)',color:'var(--blue)',fontSize:13.5,fontWeight:700,cursor:'pointer',textAlign:'center'}}>
+                {t.repeatWeek}
+              </button>
+            </>)}
+            {getDayType(popup.ds,popup.dow)!=='normal'&&(
+              <div style={{marginTop:12,padding:'14px 16px',background:'var(--bg)',borderRadius:9,fontSize:14,fontWeight:600,color:'var(--ink2)',textAlign:'center'}}>
+                {getDayType(popup.ds,popup.dow)==='work'&&<span>{lang==='ko'?'🏢 회사 출근일 — 수업 없음':'🏢 Work day — no lessons'}</span>}
+                {getDayType(popup.ds,popup.dow)==='rest'&&<span>{lang==='ko'?'🌙 휴무일':'🌙 Day off'}</span>}
+                {getDayType(popup.ds,popup.dow)==='yeoncha'&&<span>🍃 {lang==='ko'?'연차 / 개인 휴가':'Annual leave'}</span>}
+              </div>
+            )}
+          </div>
+        </div>
+      );})()}
+
+      {/* Настройки */}
+      {showSettings&&(
+        <div style={{position:'fixed',inset:0,background:'rgba(0,0,0,.4)',zIndex:200,display:'flex',alignItems:'center',justifyContent:'center',padding:20}}>
+          <div style={{background:'#fff',borderRadius:14,width:'100%',maxWidth:440,maxHeight:'90vh',overflowY:'auto',boxShadow:'var(--shadow-md)',padding:22}}>
+            <div style={{display:'flex',alignItems:'flex-start',justifyContent:'space-between',marginBottom:14,gap:10}}>
+              <div><div style={{fontSize:16,fontWeight:800}}>{t.settingsTitle}</div><div style={{fontSize:12,color:'var(--ink3)',marginTop:3}}>{t.settingsSub}</div></div>
+              <button className="btn-icon" onClick={()=>setShowSettings(false)}>✕</button>
+            </div>
+            <div className="form">
+              <div className="field"><label>{t.workDay}</label>
+                <div style={{display:'flex',gap:8,alignItems:'center'}}>
+                  <span style={{color:'var(--ink3)',fontSize:13}}>{t.workDayStart}</span>
+                  <input type="time" value={tempSettings.workDayStart||'10:00'} onChange={e=>setTempSettings(p=>({...p,workDayStart:e.target.value}))} style={{width:130}}/>
+                  <span style={{color:'var(--ink3)',fontSize:13}}>{t.workDayEnd}</span>
+                  <input type="time" value={tempSettings.workDayEnd||'19:00'} onChange={e=>setTempSettings(p=>({...p,workDayEnd:e.target.value}))} style={{width:130}}/>
+                </div>
+              </div>
+              <div className="field"><label>{t.startTime}</label>
+                <div style={{display:'flex',gap:8,alignItems:'center'}}>
+                  <input type="number" min={0} max={23} value={tempSettings.startHour} onChange={e=>setTempSettings(p=>({...p,startHour:e.target.value}))} style={{width:70}}/>
+                  <span style={{color:'var(--ink3)'}}>{t.hour}</span>
+                  <input type="number" min={0} max={59} step={5} value={tempSettings.startMin||0} onChange={e=>setTempSettings(p=>({...p,startMin:e.target.value}))} style={{width:70}}/>
+                  <span style={{color:'var(--ink3)'}}>{t.min}</span>
+                </div>
+              </div>
+              <div className="field"><label>{t.lessonDur}</label><input type="number" min={1} max={8} step={0.5} value={tempSettings.lessonDuration} onChange={e=>setTempSettings(p=>({...p,lessonDuration:e.target.value}))} style={{width:80}}/></div>
+              <div className="field"><label>{t.breakDur}</label><input type="number" min={0} max={4} step={0.5} value={tempSettings.breakDuration} onChange={e=>setTempSettings(p=>({...p,breakDuration:e.target.value}))} style={{width:80}}/></div>
+              <div className="field"><label>{t.slotsCount}</label><input type="number" min={1} max={6} value={tempSettings.slotsCount} onChange={e=>setTempSettings(p=>({...p,slotsCount:e.target.value}))} style={{width:80}}/></div>
+              <div style={{background:'var(--bg)',borderRadius:8,padding:12,display:'flex',flexWrap:'wrap',gap:6}}>
+                <div style={{fontSize:12,fontWeight:700,color:'var(--ink3)',width:'100%'}}>{t.preview}</div>
+                {genSlots({startHour:+tempSettings.startHour,startMin:+(tempSettings.startMin||0),lessonDuration:+tempSettings.lessonDuration,breakDuration:+tempSettings.breakDuration,slotsCount:+tempSettings.slotsCount}).map(s=><span key={s.id} style={{background:'var(--blue-lt)',color:'var(--blue)',fontSize:12,fontWeight:700,padding:'4px 10px',borderRadius:7,border:'1.5px solid #A5B4FC'}}>⏰ {s.label}</span>)}
+              </div>
+              <div className="form-actions">
+                <button className="btn btn-ghost" onClick={()=>setShowSettings(false)}>{t.cancel}</button>
+                <button className="btn btn-primary" onClick={applySettings}>{t.apply}</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ── Основной компонент ────────────────────────────────────────────────────────
 const TABS = [
-  {id:'students', label:'Ученики',   icon:'👥'},
-  {id:'calendar', label:'Календарь', icon:'📅'},
-  {id:'debts',    label:'Долги',     icon:'⚠️'},
-  {id:'reports',  label:'Отчёты',    icon:'📊'},
+  {id:'students',  label:'Ученики',    icon:'👥'},
+  {id:'calendar',  label:'Календарь',  icon:'📅'},
+  {id:'debts',     label:'Долги',      icon:'⚠️'},
+  {id:'reports',   label:'Отчёты',     icon:'📊'},
+  {id:'schedule',  label:'Расписание', icon:'🗓'},
 ];
 
 function Shell() {
@@ -725,7 +1143,8 @@ function Shell() {
         {tab==='students'&&<StudentsPage/>}
         {tab==='calendar'&&<CalendarPage/>}
         {tab==='debts'   &&<DebtsPage/>}
-        {tab==='reports' &&<ReportsPage/>}
+        {tab==='reports'  &&<ReportsPage/>}
+        {tab==='schedule' &&<SchedulePage/>}
       </main>
     </div>
   );
@@ -739,5 +1158,44 @@ function App() {
 
 ReactDOM.createRoot(document.getElementById('root')).render(<App/>);
 </script>
+
+<script>
+// ── Восстановление данных расписания ─────────────────────────────────────────
+// Эти данные перенесены из локальной версии. Запускается один раз.
+(function() {
+  const RESTORE_KEY = 'kt_schedule_restored_v1';
+  if (localStorage.getItem(RESTORE_KEY)) return; // уже восстановлено
+
+  const scheduleData = {
+    "kt_s3_dtype_2026_6": "{\"2026-06-25\":\"yeoncha\"}",
+    "kt_s3_slots_2026_7": JSON.stringify({
+      "2026-07-01_slot0":"busy","2026-07-03_slot0":"busy",
+      "2026-07-01_slot1":"free","2026-07-01_slot2":"free",
+      "2026-07-03_slot1":"free","2026-07-03_slot2":"free",
+      "2026-07-07_slot0":"free","2026-07-07_slot1":"free","2026-07-07_slot2":"free",
+      "2026-07-08_slot0":"free","2026-07-08_slot1":"free","2026-07-08_slot2":"free",
+      "2026-07-10_slot0":"free","2026-07-10_slot1":"free","2026-07-10_slot2":"free",
+      "2026-07-14_slot0":"free","2026-07-14_slot1":"free","2026-07-14_slot2":"free",
+      "2026-07-15_slot0":"free","2026-07-15_slot1":"free","2026-07-15_slot2":"free",
+      "2026-07-17_slot0":"free","2026-07-17_slot1":"free","2026-07-17_slot2":"free",
+      "2026-07-21_slot0":"free","2026-07-21_slot1":"free","2026-07-21_slot2":"free",
+      "2026-07-22_slot0":"free","2026-07-22_slot1":"free","2026-07-22_slot2":"free",
+      "2026-07-24_slot0":"free","2026-07-24_slot1":"free","2026-07-24_slot2":"free",
+      "2026-07-28_slot0":"free","2026-07-28_slot1":"free","2026-07-28_slot2":"free",
+      "2026-07-29_slot0":"free","2026-07-29_slot1":"free","2026-07-29_slot2":"free",
+      "2026-07-31_slot0":"free","2026-07-31_slot1":"free","2026-07-31_slot2":"free"
+    }),
+    "kt_s3_lang": "\"ru\""
+  };
+
+  for (const [key, value] of Object.entries(scheduleData)) {
+    localStorage.setItem(key, value);
+  }
+
+  localStorage.setItem(RESTORE_KEY, '1');
+  console.log('✓ Данные расписания восстановлены');
+})();
+</script>
+
 </body>
 </html>
