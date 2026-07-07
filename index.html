@@ -1,0 +1,743 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>Корейский Тьютор</title>
+<!-- React + Babel -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.5/babel.min.js"></script>
+<style id="app-styles">
+/* ── Дизайн-система ── */
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+:root{
+  --bg:#F7F8FA;--surface:#fff;--border:#E4E7ED;--border2:#CDD1DA;
+  --ink:#1A1D23;--ink2:#4B5263;--ink3:#8B93A5;
+  --blue:#3B5BDB;--blue-lt:#EEF2FF;--blue-dk:#2D47B8;
+  --green:#2F9E44;--green-lt:#EBFBEE;
+  --red:#E03131;--red-lt:#FFF5F5;
+  --amber:#E67700;--amber-lt:#FFF9DB;
+  --purple:#7048E8;--purple-lt:#F3F0FF;
+  --radius:10px;--shadow:0 1px 4px rgba(0,0,0,.07),0 4px 16px rgba(0,0,0,.05);
+  --shadow-md:0 4px 24px rgba(0,0,0,.14);
+}
+html,body,#root{height:100%;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;font-size:14px;color:var(--ink);background:var(--bg);-webkit-font-smoothing:antialiased}
+.app-shell{display:flex;height:100vh;overflow:hidden}
+/* Сайдбар */
+.sidebar{width:210px;flex-shrink:0;background:#1A1D23;display:flex;flex-direction:column}
+.sidebar-logo{display:flex;align-items:center;gap:11px;padding:22px 18px 18px;border-bottom:1px solid rgba(255,255,255,.1)}
+.logo-ko{font-size:26px;font-weight:900;color:#7EA8FF;line-height:1}
+.logo-title{font-size:12.5px;font-weight:700;color:#fff}
+.logo-sub{font-size:11px;color:#8B93A5}
+.nav-list{list-style:none;padding:10px 8px;flex:1;display:flex;flex-direction:column;gap:2px}
+.nav-item{display:flex;align-items:center;gap:9px;width:100%;padding:10px 12px;border-radius:8px;border:none;background:transparent;color:rgba(255,255,255,.55);cursor:pointer;font-size:13.5px;font-weight:500;transition:background .15s,color .15s}
+.nav-item:hover{background:rgba(255,255,255,.07);color:#fff}
+.nav-item.active{background:var(--blue);color:#fff}
+.nav-badge{margin-left:auto;background:var(--red);color:#fff;font-size:11px;font-weight:700;padding:1px 7px;border-radius:20px}
+.sidebar-footer{padding:14px 18px;border-top:1px solid rgba(255,255,255,.08);font-size:11px;color:rgba(255,255,255,.2);display:flex;justify-content:space-between;align-items:center}
+.sidebar-footer button{background:none;border:none;color:rgba(255,255,255,.3);cursor:pointer;font-size:11px}
+.sidebar-footer button:hover{color:var(--red)}
+/* Контент */
+.main-content{flex:1;overflow-y:auto;padding:28px 32px}
+.page-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:22px;flex-wrap:wrap;gap:12px}
+.page-title{display:flex;align-items:center;gap:9px}
+.page-title h1{font-size:21px;font-weight:800;letter-spacing:-.4px}
+.page-title .ti{font-size:20px}
+.count-badge{background:var(--blue-lt);color:var(--blue);font-size:12px;font-weight:700;padding:2px 9px;border-radius:20px}
+.count-badge.debt{background:var(--red-lt);color:var(--red)}
+.page-controls{display:flex;align-items:center;gap:10px}
+/* Кнопки */
+.btn{display:inline-flex;align-items:center;gap:6px;padding:8px 16px;border-radius:8px;border:none;font-size:13.5px;font-weight:600;cursor:pointer;transition:background .15s;white-space:nowrap}
+.btn-primary{background:var(--blue);color:#fff}.btn-primary:hover{background:var(--blue-dk)}
+.btn-ghost{background:transparent;color:var(--ink2);border:1.5px solid var(--border2)}.btn-ghost:hover{background:var(--bg)}
+.btn-danger{background:var(--red);color:#fff}
+.btn-icon{display:inline-flex;align-items:center;justify-content:center;width:30px;height:30px;border-radius:6px;border:none;background:transparent;color:var(--ink3);cursor:pointer;font-size:15px;transition:background .15s,color .15s}
+.btn-icon:hover{background:var(--bg);color:var(--ink)}
+.btn-icon.danger:hover{background:var(--red-lt);color:var(--red)}
+/* Поиск */
+.search-input{padding:8px 12px;border:1.5px solid var(--border);border-radius:8px;font-size:13.5px;width:190px;outline:none;background:var(--surface)}
+.search-input:focus{border-color:var(--blue)}
+/* Карточки учеников */
+.cards-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:16px}
+.student-card{background:var(--surface);border:1.5px solid var(--border);border-radius:var(--radius);padding:18px;box-shadow:var(--shadow)}
+.student-card.has-debt{border-color:#FBBF24;background:linear-gradient(135deg,#fff 0%,#FFFBEB 100%)}
+.card-top{display:flex;align-items:flex-start;gap:11px;margin-bottom:14px}
+.card-avatar{width:40px;height:40px;border-radius:50%;background:var(--blue-lt);color:var(--blue);font-size:17px;font-weight:800;display:flex;align-items:center;justify-content:center;flex-shrink:0}
+.card-info{flex:1}.card-info h3{font-size:15px;font-weight:700}
+.badge{display:inline-block;font-size:11px;font-weight:600;padding:2px 7px;border-radius:20px;background:var(--blue-lt);color:var(--blue);margin-top:3px}
+.badge.sm{font-size:10.5px;padding:1px 6px}
+.card-actions{display:flex;gap:3px;flex-shrink:0}
+.card-grid{display:grid;grid-template-columns:1fr 1fr;gap:7px;margin-bottom:11px}
+.card-stat{display:flex;flex-direction:column;gap:1px}
+.stat-label{font-size:10px;color:var(--ink3);text-transform:uppercase;letter-spacing:.4px;font-weight:700}
+.stat-value{font-size:13px;font-weight:700}
+.card-meta{font-size:12px;color:var(--ink3);margin-bottom:8px}
+.card-notes{font-size:12.5px;color:var(--ink2);background:var(--bg);padding:7px 9px;border-radius:6px;margin-bottom:9px}
+.debt-block{display:flex;align-items:center;gap:8px;padding:7px 11px;background:var(--amber-lt);border:1.5px solid #FBBF24;border-radius:7px;margin-top:8px;flex-wrap:wrap}
+.debt-label{font-size:12px;font-weight:700;color:var(--amber)}
+.debt-amount-inline{font-size:14px;font-weight:800;color:var(--amber)}
+.no-debt{font-size:12px;color:var(--green);font-weight:600;margin-top:8px}
+/* Пустое состояние */
+.empty-state{display:flex;flex-direction:column;align-items:center;justify-content:center;min-height:280px;gap:14px;color:var(--ink3)}
+.empty-icon{font-size:44px;opacity:.5}
+/* Модал */
+.modal-overlay{position:fixed;inset:0;background:rgba(0,0,0,.45);display:flex;align-items:center;justify-content:center;z-index:1000;padding:20px}
+.modal{background:var(--surface);border-radius:14px;width:100%;max-width:470px;max-height:90vh;overflow-y:auto;box-shadow:var(--shadow-md);padding:26px}
+.modal-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:20px}
+.modal-header h2{font-size:17px;font-weight:800}
+/* Форма */
+.form{display:flex;flex-direction:column;gap:15px}
+.field{display:flex;flex-direction:column;gap:5px}
+.field>label:first-child{font-size:12px;font-weight:700;color:var(--ink2);text-transform:uppercase;letter-spacing:.4px}
+.field input,.field textarea,.field select,select.ss{padding:8px 11px;border:1.5px solid var(--border);border-radius:8px;font-size:14px;outline:none;background:var(--surface);color:var(--ink);transition:border-color .15s}
+.field input:focus,.field textarea:focus,.field select:focus,select.ss:focus{border-color:var(--blue)}
+.field textarea{resize:vertical}
+.radio-group{display:flex;gap:14px;flex-wrap:wrap}
+.radio-label,.checkbox-label{display:flex;align-items:center;gap:7px;font-size:13.5px;cursor:pointer;font-weight:500}
+.form-actions{display:flex;gap:10px;justify-content:flex-end;margin-top:6px}
+/* Календарь */
+.cal-controls{display:flex;align-items:center;gap:14px;margin-bottom:14px;flex-wrap:wrap}
+select.ss{min-width:200px}
+.month-nav{display:flex;align-items:center;gap:8px}
+.month-label{font-size:15px;font-weight:700;min-width:160px;text-align:center}
+.cal-hint{font-size:12px;color:var(--blue);margin-bottom:12px;padding:7px 11px;background:var(--blue-lt);border-radius:7px;font-weight:500}
+.calendar-wrap{background:var(--surface);border:1.5px solid var(--border);border-radius:var(--radius);padding:16px;box-shadow:var(--shadow);margin-bottom:18px}
+.cal-grid{display:grid;grid-template-columns:repeat(7,1fr);gap:4px}
+.cal-head{text-align:center;font-size:10.5px;font-weight:800;color:var(--ink3);text-transform:uppercase;letter-spacing:.5px;padding:5px 0 8px}
+.cal-day{min-height:68px;border-radius:7px;border:1.5px solid transparent;padding:5px;cursor:pointer;transition:background .12s,border-color .12s;display:flex;flex-direction:column;align-items:flex-start}
+.cal-day:hover{background:var(--bg);border-color:var(--border)}
+.cal-day.today .day-num{background:var(--blue);color:#fff;border-radius:50%;width:21px;height:21px;display:flex;align-items:center;justify-content:center}
+.cal-day.has-session{background:var(--blue-lt);border-color:#A5B4FC}
+.cal-day.held{background:var(--green-lt);border-color:#86EFAC}
+.day-num{font-size:12.5px;font-weight:700;color:var(--ink2);line-height:1;margin-bottom:4px}
+.session-controls{display:flex;flex-direction:column;gap:3px;width:100%}
+.check-wrap{display:flex;align-items:center;gap:3px;font-size:10.5px;font-weight:700;cursor:pointer;color:var(--green)}
+.check-wrap input{width:13px;height:13px;cursor:pointer;accent-color:var(--green)}
+.paid-check{color:var(--amber)}.paid-check input{accent-color:var(--amber)}
+.month-summary{background:var(--surface);border:1.5px solid var(--border);border-radius:var(--radius);padding:16px 18px;box-shadow:var(--shadow);display:flex;flex-direction:column;gap:9px;margin-bottom:14px;max-width:400px}
+.summary-row{display:flex;align-items:center;justify-content:space-between;font-size:14px}
+.summary-row strong{font-weight:800}
+.month-pay-toggle{display:flex;align-items:center;gap:8px;cursor:pointer;font-weight:700}
+.month-pay-toggle input{accent-color:var(--green);width:16px;height:16px}
+.pay-paid{color:var(--green)}.pay-unpaid{color:var(--red)}
+/* Долги */
+.debt-summary-card{background:var(--surface);border:1.5px solid var(--border);border-radius:var(--radius);padding:16px 18px;box-shadow:var(--shadow);max-width:400px;margin-bottom:22px;display:flex;flex-direction:column;gap:9px}
+.ds-row{display:flex;justify-content:space-between;font-size:14px}
+.ds-row.total{border-top:1px solid var(--border);padding-top:9px}
+.total-debt{color:var(--red);font-size:18px;font-weight:900}
+.debt-list{display:flex;flex-direction:column;gap:9px}
+.debt-item{background:var(--surface);border:1.5px solid var(--border);border-radius:var(--radius);padding:13px 16px;display:flex;align-items:center;gap:12px;flex-wrap:wrap;box-shadow:var(--shadow)}
+.debt-name{display:flex;align-items:center;gap:8px;font-weight:700;font-size:14px;flex:1;min-width:130px}
+.avatar-sm{width:28px;height:28px;border-radius:50%;background:var(--blue-lt);color:var(--blue);font-size:12px;font-weight:800;display:flex;align-items:center;justify-content:center;flex-shrink:0}
+.debt-month-tag{font-size:11px;font-weight:600;padding:2px 7px;background:var(--amber-lt);color:var(--amber);border-radius:5px;border:1px solid #FBBF24}
+.debt-amount-col{font-size:15px;font-weight:800;color:var(--red);white-space:nowrap}
+/* Отчёты */
+.kpi-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:12px;margin-bottom:24px}
+.kpi-card{background:var(--surface);border:1.5px solid var(--border);border-radius:var(--radius);padding:14px 16px;box-shadow:var(--shadow);display:flex;flex-direction:column;gap:4px}
+.kpi-card.green{border-color:#86EFAC;background:var(--green-lt)}.kpi-card.red{border-color:#FCA5A5;background:var(--red-lt)}
+.kpi-card.blue{border-color:#A5B4FC;background:var(--blue-lt)}
+.kpi-val{font-size:20px;font-weight:900;line-height:1}
+.kpi-card.green .kpi-val{color:var(--green)}.kpi-card.red .kpi-val{color:var(--red)}.kpi-card.blue .kpi-val{color:var(--blue)}
+.kpi-label{font-size:11.5px;color:var(--ink3);font-weight:500}
+.reports-grid{display:grid;grid-template-columns:1fr 1fr;gap:18px}
+.report-section{background:var(--surface);border:1.5px solid var(--border);border-radius:var(--radius);padding:16px 18px;box-shadow:var(--shadow)}
+.report-section.full-width{grid-column:1/-1}
+.section-title{font-size:13.5px;font-weight:800;margin-bottom:12px;display:flex;align-items:center;gap:7px}
+.green-title{color:var(--green)}.red-title{color:var(--red)}
+.empty-text{font-size:13px;color:var(--ink3)}
+.student-list{list-style:none;display:flex;flex-direction:column;gap:7px}
+.student-list li{display:flex;align-items:center;gap:7px;font-size:13.5px;font-weight:500}
+.debt-tag{margin-left:auto;font-size:12px;font-weight:700;color:var(--red);background:var(--red-lt);padding:2px 7px;border-radius:5px}
+.report-table{width:100%;border-collapse:collapse;font-size:13px}
+.report-table th{text-align:left;padding:7px 9px;background:var(--bg);font-size:11px;font-weight:700;color:var(--ink3);text-transform:uppercase;letter-spacing:.4px;border-bottom:1.5px solid var(--border)}
+.report-table td{padding:8px 9px;border-bottom:1px solid var(--border);color:var(--ink2)}
+.report-table tr:last-child td{border-bottom:none}
+.report-table tr:hover td{background:var(--bg)}
+/* Setup screen */
+.setup-screen{min-height:100vh;display:flex;align-items:center;justify-content:center;background:var(--bg);padding:20px}
+.setup-card{background:var(--surface);border-radius:16px;padding:36px;width:100%;max-width:460px;box-shadow:var(--shadow-md)}
+.setup-logo{font-size:48px;text-align:center;margin-bottom:8px}
+.setup-title{font-size:22px;font-weight:800;text-align:center;margin-bottom:6px}
+.setup-sub{font-size:14px;color:var(--ink3);text-align:center;margin-bottom:28px}
+.setup-steps{display:flex;flex-direction:column;gap:14px;margin-bottom:24px}
+.setup-step{display:flex;gap:12px;align-items:flex-start}
+.step-num{width:26px;height:26px;border-radius:50%;background:var(--blue);color:#fff;font-size:12px;font-weight:800;display:flex;align-items:center;justify-content:center;flex-shrink:0;margin-top:2px}
+.step-text{font-size:13.5px;color:var(--ink2);line-height:1.5}
+.step-text a{color:var(--blue)}
+.setup-error{color:var(--red);font-size:13px;text-align:center;padding:8px;background:var(--red-lt);border-radius:7px}
+/* Loader */
+.loader{display:flex;align-items:center;justify-content:center;height:200px;font-size:14px;color:var(--ink3)}
+.spinner{width:32px;height:32px;border:3px solid var(--border);border-top-color:var(--blue);border-radius:50%;animation:spin .7s linear infinite;margin-right:12px}
+@keyframes spin{to{transform:rotate(360deg)}}
+/* Синхронизация */
+.sync-bar{position:fixed;bottom:16px;right:16px;background:var(--ink);color:#fff;padding:8px 14px;border-radius:8px;font-size:12px;font-weight:600;z-index:2000;display:flex;align-items:center;gap:8px}
+.sync-bar.ok{background:var(--green)}
+.sync-bar.err{background:var(--red)}
+::-webkit-scrollbar{width:6px}::-webkit-scrollbar-track{background:transparent}::-webkit-scrollbar-thumb{background:var(--border2);border-radius:3px}
+</style>
+</head>
+<body>
+<div id="root"></div>
+
+<script type="text/babel" data-presets="react">
+const { useState, useEffect, useCallback, useRef, createContext, useContext } = React;
+
+// ── Supabase клиент (встроенный, без npm) ────────────────────────────────────
+const CONFIG_KEY = 'kt_sb_config';
+const getConfig = () => { try { return JSON.parse(localStorage.getItem(CONFIG_KEY)); } catch { return null; } };
+const saveConfig = (url, key) => localStorage.setItem(CONFIG_KEY, JSON.stringify({url, key}));
+const clearConfig = () => { localStorage.removeItem(CONFIG_KEY); window.location.reload(); };
+
+function makeClient(url, anonKey) {
+  const h = { 'apikey': anonKey, 'Authorization': `Bearer ${anonKey}`, 'Content-Type': 'application/json', 'Prefer': 'return=representation' };
+
+  const req = async (method, path, body, extraHeaders={}) => {
+    const res = await fetch(`${url}/rest/v1/${path}`, { method, headers: {...h, ...extraHeaders}, body: body ? JSON.stringify(body) : undefined });
+    if (!res.ok) { const e = await res.json().catch(()=>({message:'Network error'})); throw new Error(e.message || `HTTP ${res.status}`); }
+    return res.status === 204 ? [] : res.json();
+  };
+
+  return {
+    select: (table, cols='*', filters='', order='created_at') =>
+      req('GET', `${table}?select=${cols}${filters}&order=${order}`),
+    insert: (table, data) => req('POST', table, data),
+    update: (table, data, id) => req('PATCH', `${table}?id=eq.${id}`, data),
+    upsert: (table, data, constraint) => req('POST', table, data, {'Prefer': `resolution=merge-duplicates,return=representation`}),
+    delete: (table, col, val) => req('DELETE', `${table}?${col}=eq.${encodeURIComponent(val)}`),
+  };
+}
+
+let _sb = null;
+const getSB = () => { if (!_sb) { const c=getConfig(); if (!c) throw new Error('No config'); _sb=makeClient(c.url, c.key); } return _sb; };
+
+// ── Тарифы и расчёты ─────────────────────────────────────────────────────────
+const MONTHLY_RATES = {'2x':300000,'3x':450000};
+const SESSION_RATES = {'2x':37500,'3x':37500};
+const MONTHS = ['Январь','Февраль','Март','Апрель','Май','Июнь','Июль','Август','Сентябрь','Октябрь','Ноябрь','Декабрь'];
+const WDAYS  = ['Пн','Вт','Ср','Чт','Пт','Сб','Вс'];
+const fmt  = n => new Intl.NumberFormat('ko-KR').format(n)+' ₩';
+const sRate = f => MONTHLY_RATES[f] / (f==='2x'?8:12);
+const hRate = f => sRate(f)/3;
+const genId = () => crypto.randomUUID();
+const pad   = n => String(n).padStart(2,'0');
+const dKey  = d => `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}`;
+const mLabel = (y,m) => `${MONTHS[m-1]} ${y}`;
+
+function calcDebt(student, sessions, payments) {
+  const sorted = [...sessions].filter(s=>s.student_id===student.id).sort((a,b)=>a.date.localeCompare(b.date));
+  const freeCount = student.has_free ? (student.free_count||0) : 0;
+  let debtAmount=0; const debtMonths=new Set();
+  if (student.payment_type==='monthly') {
+    const heldByMonth={};let heldIdx=0;
+    for (const s of sorted) {
+      if (!s.held) continue; heldIdx++;
+      if (heldIdx<=freeCount) continue;
+      const d=new Date(s.date), key=`${d.getFullYear()}-${d.getMonth()+1}`;
+      heldByMonth[key]={year:d.getFullYear(),month:d.getMonth()+1};
+    }
+    for (const key of Object.keys(heldByMonth)) {
+      const {year,month}=heldByMonth[key];
+      const p=payments.find(p=>p.student_id===student.id&&p.year===year&&p.month===month);
+      if (!p||!p.paid){debtAmount+=MONTHLY_RATES[student.frequency];debtMonths.add(key);}
+    }
+  } else {
+    const rate=sRate(student.frequency); let heldIdx=0;
+    for (const s of sorted) {
+      if (!s.held) continue; heldIdx++;
+      if (heldIdx<=freeCount||s.paid) continue;
+      debtAmount+=rate; const d=new Date(s.date); debtMonths.add(`${d.getFullYear()}-${d.getMonth()+1}`);
+    }
+  }
+  return {debtAmount, debtMonths:Array.from(debtMonths)};
+}
+
+// ── Контекст данных ───────────────────────────────────────────────────────────
+const DataCtx = createContext(null);
+
+function DataProvider({children}) {
+  const [students, setStudents] = useState([]);
+  const [sessions, setSessions] = useState([]);
+  const [payments, setPayments] = useState([]);
+  const [loading,  setLoading]  = useState(true);
+  const [sync,     setSync]     = useState(null); // null|'saving'|'ok'|'err'
+  const syncTimer = useRef(null);
+
+  const showSync = (status) => {
+    setSync(status);
+    clearTimeout(syncTimer.current);
+    if (status==='ok') syncTimer.current = setTimeout(()=>setSync(null), 2000);
+  };
+
+  const loadAll = useCallback(async () => {
+    setLoading(true);
+    try {
+      const sb = getSB();
+      const [s, ses, p] = await Promise.all([
+        sb.select('students'),
+        sb.select('sessions'),
+        sb.select('monthly_payments'),
+      ]);
+      setStudents(s||[]); setSessions(ses||[]); setPayments(p||[]);
+    } catch(e) { console.error(e); }
+    setLoading(false);
+  }, []);
+
+  useEffect(()=>{ loadAll(); }, [loadAll]);
+
+  const withSync = async (fn) => {
+    showSync('saving');
+    try { await fn(); showSync('ok'); }
+    catch(e) { showSync('err'); console.error(e); }
+  };
+
+  // Ученики
+  const addStudent = (data) => withSync(async () => {
+    const sb=getSB(), row={...data,id:genId()};
+    await sb.insert('students',row);
+    setStudents(p=>[...p,row]);
+  });
+  const updateStudent = (id,data) => withSync(async () => {
+    const sb=getSB(); await sb.update('students',data,id);
+    setStudents(p=>p.map(s=>s.id===id?{...s,...data}:s));
+  });
+  const deleteStudent = (id) => withSync(async () => {
+    const sb=getSB();
+    await sb.delete('sessions','student_id',id);
+    await sb.delete('monthly_payments','student_id',id);
+    await sb.delete('students','id',id);
+    setStudents(p=>p.filter(s=>s.id!==id));
+    setSessions(p=>p.filter(s=>s.student_id!==id));
+    setPayments(p=>p.filter(p=>p.student_id!==id));
+  });
+
+  // Занятия
+  const addSession = (studentId, date) => withSync(async () => {
+    if (sessions.find(s=>s.student_id===studentId&&s.date===date)) return;
+    const sb=getSB(), row={id:genId(),student_id:studentId,date,held:false,paid:false};
+    await sb.insert('sessions',row);
+    setSessions(p=>[...p,row]);
+  });
+  const removeSession = (id) => withSync(async () => {
+    const sb=getSB(); await sb.delete('sessions','id',id);
+    setSessions(p=>p.filter(s=>s.id!==id));
+  });
+  const toggleSession = (id, field) => withSync(async () => {
+    const sb=getSB(), cur=sessions.find(s=>s.id===id);
+    if (!cur) return;
+    const val=!cur[field]; await sb.update('sessions',{[field]:val},id);
+    setSessions(p=>p.map(s=>s.id===id?{...s,[field]:val}:s));
+  });
+
+  // Оплата
+  const setMonthPayment = (studentId, year, month, paid) => withSync(async () => {
+    const sb=getSB();
+    const existing=payments.find(p=>p.student_id===studentId&&p.year===year&&p.month===month);
+    if (existing) {
+      await sb.update('monthly_payments',{paid},existing.id);
+      setPayments(p=>p.map(x=>x.id===existing.id?{...x,paid}:x));
+    } else {
+      const row={id:genId(),student_id:studentId,year,month,paid};
+      await sb.insert('monthly_payments',row);
+      setPayments(p=>[...p,row]);
+    }
+  });
+
+  return (
+    <DataCtx.Provider value={{students,sessions,payments,loading,addStudent,updateStudent,deleteStudent,addSession,removeSession,toggleSession,setMonthPayment,reload:loadAll}}>
+      {children}
+      {sync && (
+        <div className={`sync-bar ${sync==='saving'?'':sync}`}>
+          {sync==='saving'&&<><div className="spinner" style={{width:14,height:14,borderWidth:2,marginRight:6}}/>Сохранение…</>}
+          {sync==='ok'&&'✓ Сохранено'}
+          {sync==='err'&&'✗ Ошибка сохранения'}
+        </div>
+      )}
+    </DataCtx.Provider>
+  );
+}
+const useData = () => useContext(DataCtx);
+
+// ── Форма ученика ─────────────────────────────────────────────────────────────
+const EMPTY = {name:'',level:'',start_date:new Date().toISOString().slice(0,10),has_free:false,free_count:0,frequency:'2x',payment_type:'monthly',notes:''};
+
+function StudentForm({student, onSave, onClose}) {
+  const [f, setF] = useState(student?{...EMPTY,...student}:EMPTY);
+  const set = (k,v) => setF(p=>({...p,[k]:v}));
+  const submit = (e) => { e.preventDefault(); if (!f.name.trim()) return; onSave({...f,free_count:f.has_free?Number(f.free_count):0}); };
+  return (
+    <div className="modal-overlay">
+      <div className="modal">
+        <div className="modal-header">
+          <h2>{student?'Редактировать':'Новый ученик'}</h2>
+          <button className="btn-icon" onClick={onClose}>✕</button>
+        </div>
+        <form onSubmit={submit} className="form">
+          <div className="field"><label>Имя *</label><input value={f.name} onChange={e=>set('name',e.target.value)} required/></div>
+          <div className="field"><label>Уровень</label><input value={f.level} onChange={e=>set('level',e.target.value)} placeholder="Beginner / TOPIK 1 / A2…"/></div>
+          <div className="field"><label>Дата начала</label><input type="date" value={f.start_date} onChange={e=>set('start_date',e.target.value)}/></div>
+          <div className="field"><label>Формат</label><div className="radio-group">
+            {[['2x','2×/нед'],['3x','3×/нед']].map(([v,l])=><label key={v} className="radio-label"><input type="radio" checked={f.frequency===v} onChange={()=>set('frequency',v)}/>{l}</label>)}
+          </div></div>
+          <div className="field"><label>Оплата</label><div className="radio-group">
+            {[['monthly','Помесячная'],['perSession','По занятиям']].map(([v,l])=><label key={v} className="radio-label"><input type="radio" checked={f.payment_type===v} onChange={()=>set('payment_type',v)}/>{l}</label>)}
+          </div></div>
+          <div className="field">
+            <label className="checkbox-label"><input type="checkbox" checked={f.has_free} onChange={e=>set('has_free',e.target.checked)}/>Бесплатные занятия</label>
+            {f.has_free&&<input type="number" min={1} max={50} value={f.free_count} onChange={e=>set('free_count',e.target.value)} style={{marginTop:7}}/>}
+          </div>
+          <div className="field"><label>Заметки</label><textarea value={f.notes} onChange={e=>set('notes',e.target.value)} rows={3}/></div>
+          <div className="form-actions">
+            <button type="button" className="btn btn-ghost" onClick={onClose}>Отмена</button>
+            <button type="submit" className="btn btn-primary">{student?'Сохранить':'Добавить'}</button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+}
+
+// ── Карточка ученика ──────────────────────────────────────────────────────────
+function StudentCard({student, onEdit, onDelete}) {
+  const {sessions, payments} = useData();
+  const {debtAmount, debtMonths} = calcDebt(student, sessions, payments);
+  return (
+    <div className={`student-card ${debtAmount>0?'has-debt':''}`}>
+      <div className="card-top">
+        <div className="card-avatar">{student.name.charAt(0).toUpperCase()}</div>
+        <div className="card-info"><h3>{student.name}</h3>{student.level&&<span className="badge">{student.level}</span>}</div>
+        <div className="card-actions">
+          <button className="btn-icon" onClick={()=>onEdit(student)}>✏️</button>
+          <button className="btn-icon danger" onClick={()=>onDelete(student.id)}>🗑</button>
+        </div>
+      </div>
+      <div className="card-grid">
+        <div className="card-stat"><span className="stat-label">Формат</span><span className="stat-value">{student.frequency==='2x'?'2×/нед':'3×/нед'}</span></div>
+        <div className="card-stat"><span className="stat-label">Оплата</span><span className="stat-value">{student.payment_type==='monthly'?'Помесячная':'По занятиям'}</span></div>
+        <div className="card-stat"><span className="stat-label">В месяц</span><span className="stat-value">{fmt(MONTHLY_RATES[student.frequency])}</span></div>
+        <div className="card-stat"><span className="stat-label">1 занятие</span><span className="stat-value">{fmt(sRate(student.frequency))}</span></div>
+        <div className="card-stat"><span className="stat-label">1 час</span><span className="stat-value">{fmt(hRate(student.frequency))}</span></div>
+        {student.has_free&&<div className="card-stat"><span className="stat-label">Бесплатных</span><span className="stat-value" style={{color:'var(--purple)'}}>{student.free_count} зан.</span></div>}
+      </div>
+      {student.start_date&&<div className="card-meta">📅 Начало: {new Date(student.start_date).toLocaleDateString('ru-RU')}</div>}
+      {student.notes&&<div className="card-notes">{student.notes}</div>}
+      {debtAmount>0?(
+        <div className="debt-block">
+          <span className="debt-label">Долг:</span>
+          <span className="debt-amount-inline">{fmt(debtAmount)}</span>
+          <span style={{fontSize:11,color:'var(--ink3)'}}>· {debtMonths.map(k=>{const[y,m]=k.split('-');return mLabel(+y,+m);}).join(', ')}</span>
+        </div>
+      ):<div className="no-debt">✓ Нет задолженностей</div>}
+    </div>
+  );
+}
+
+// ── Страница ученики ──────────────────────────────────────────────────────────
+function StudentsPage() {
+  const {students, addStudent, updateStudent, deleteStudent, loading} = useData();
+  const [open, setOpen] = useState(false);
+  const [editing, setEditing] = useState(null);
+  const [search, setSearch] = useState('');
+  const filtered = students.filter(s=>s.name.toLowerCase().includes(search.toLowerCase()));
+  const save = (data) => { editing?updateStudent(editing.id,data):addStudent(data); setOpen(false); setEditing(null); };
+  const del  = (id)  => { if (confirm('Удалить ученика и все его данные?')) deleteStudent(id); };
+  return (
+    <div className="page">
+      <div className="page-header">
+        <div className="page-title"><span className="ti">👥</span><h1>Ученики</h1><span className="count-badge">{students.length}</span></div>
+        <div className="page-controls">
+          <input className="search-input" placeholder="Поиск…" value={search} onChange={e=>setSearch(e.target.value)}/>
+          <button className="btn btn-primary" onClick={()=>{setEditing(null);setOpen(true);}}>+ Добавить</button>
+        </div>
+      </div>
+      {loading?<div className="loader"><div className="spinner"/>Загрузка…</div>:
+       filtered.length===0?<div className="empty-state"><div className="empty-icon">학생</div><p>{search?'Ничего не найдено':'Добавьте первого ученика'}</p></div>:
+       <div className="cards-grid">{filtered.map(s=><StudentCard key={s.id} student={s} onEdit={x=>{setEditing(x);setOpen(true);}} onDelete={del}/>)}</div>}
+      {open&&<StudentForm student={editing} onSave={save} onClose={()=>{setOpen(false);setEditing(null);}}/>}
+    </div>
+  );
+}
+
+// ── Страница календарь ────────────────────────────────────────────────────────
+function CalendarPage() {
+  const today=new Date();
+  const [year,setYear]=useState(today.getFullYear());
+  const [month,setMonth]=useState(today.getMonth()+1);
+  const [selId,setSelId]=useState('');
+  const {students,sessions,payments,addSession,removeSession,toggleSession,setMonthPayment}=useData();
+
+  const prev=()=>{if(month===1){setMonth(12);setYear(y=>y-1);}else setMonth(m=>m-1);};
+  const next=()=>{if(month===12){setMonth(1);setYear(y=>y+1);}else setMonth(m=>m+1);};
+  const student=students.find(s=>s.id===selId)||null;
+  const freeCount=student?.has_free?(student.free_count||0):0;
+  const myS=sessions.filter(s=>s.student_id===selId&&new Date(s.date).getFullYear()===year&&new Date(s.date).getMonth()+1===month).sort((a,b)=>a.date.localeCompare(b.date));
+  const allHeld=sessions.filter(s=>s.student_id===selId&&s.held).sort((a,b)=>a.date.localeCompare(b.date));
+  const getHeldIdx=id=>allHeld.findIndex(s=>s.id===id)+1;
+  const days=[],last=new Date(year,month,0).getDate();
+  for(let d=1;d<=last;d++){const dow=(new Date(year,month-1,d).getDay()+6)%7;days.push({day:d,dow});}
+  const firstDow=days[0].dow;
+  const blanks=Array(firstDow).fill(null);
+  const byDate={};myS.forEach(s=>{byDate[s.date]=s;});
+  const monthPay=payments.find(p=>p.student_id===selId&&p.year===year&&p.month===month);
+  const heldCount=myS.filter(s=>s.held).length;
+  return (
+    <div className="page">
+      <div className="page-header"><div className="page-title"><span className="ti">📅</span><h1>Календарь оплат</h1></div></div>
+      <div className="cal-controls">
+        <select className="ss" value={selId} onChange={e=>setSelId(e.target.value)}>
+          <option value="">— Выберите ученика —</option>
+          {students.map(s=><option key={s.id} value={s.id}>{s.name}</option>)}
+        </select>
+        <div className="month-nav">
+          <button className="btn-icon" onClick={prev}>◀</button>
+          <span className="month-label">{MONTHS[month-1]} {year}</span>
+          <button className="btn-icon" onClick={next}>▶</button>
+        </div>
+      </div>
+      {!student?<div className="empty-state"><div className="empty-icon">📅</div><p>Выберите ученика</p></div>:(
+        <>
+          <div className="cal-hint">Нажмите на день чтобы добавить или удалить занятие</div>
+          <div className="calendar-wrap">
+            <div className="cal-grid">
+              {WDAYS.map(d=><div key={d} className="cal-head">{d}</div>)}
+              {blanks.map((_,i)=><div key={`b${i}`}/>)}
+              {days.map(({day,dow})=>{
+                const k=`${year}-${pad(month)}-${pad(day)}`;
+                const s=byDate[k]; const isToday=k===dKey(new Date());
+                const hIdx=s?.held?getHeldIdx(s.id):0;
+                const isFree=hIdx>0&&hIdx<=freeCount;
+                return (
+                  <div key={k} className={`cal-day ${s?'has-session':''} ${isToday?'today':''} ${s?.held&&!isFree?'held':''}`}
+                    onClick={()=>student&&(s?removeSession(s.id):addSession(student.id,k))}>
+                    <span className="day-num">{day}</span>
+                    {s&&<div className="session-controls" onClick={e=>e.stopPropagation()}>
+                      {isFree?<span style={{fontSize:9,color:'var(--purple)',fontWeight:700}}>бесплатно</span>:<>
+                        <label className="check-wrap"><input type="checkbox" checked={s.held} onChange={()=>toggleSession(s.id,'held')}/>✓</label>
+                        {student.payment_type==='perSession'&&<label className="check-wrap paid-check"><input type="checkbox" checked={s.paid} onChange={()=>toggleSession(s.id,'paid')}/>₩</label>}
+                      </>}
+                    </div>}
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+          <div className="month-summary">
+            <div className="summary-row"><span>Занятий:</span><strong>{myS.length}</strong></div>
+            <div className="summary-row"><span>Проведено:</span><strong>{heldCount}</strong></div>
+            {student.payment_type==='monthly'?(
+              <div className="summary-row"><span>Оплата за месяц:</span>
+                <label className="month-pay-toggle">
+                  <input type="checkbox" checked={monthPay?.paid||false} onChange={()=>setMonthPayment(student.id,year,month,!(monthPay?.paid||false))}/>
+                  <span className={monthPay?.paid?'pay-paid':'pay-unpaid'}>{monthPay?.paid?'✓ Оплачен':'✗ Не оплачен'}</span>
+                </label>
+              </div>
+            ):(
+              <div className="summary-row"><span>Оплачено занятий:</span><strong>{myS.filter(s=>s.paid).length} / {myS.length}</strong></div>
+            )}
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
+// ── Страница долги ────────────────────────────────────────────────────────────
+function DebtsPage() {
+  const {students,sessions,payments}=useData();
+  const debtors=students.map(s=>({student:s,...calcDebt(s,sessions,payments)})).filter(d=>d.debtAmount>0).sort((a,b)=>b.debtAmount-a.debtAmount);
+  const total=debtors.reduce((s,d)=>s+d.debtAmount,0);
+  return (
+    <div className="page">
+      <div className="page-header"><div className="page-title"><span className="ti">⚠️</span><h1>Долги</h1>{debtors.length>0&&<span className="count-badge debt">{debtors.length}</span>}</div></div>
+      {debtors.length===0?<div className="empty-state"><div className="empty-icon">🎉</div><p>Долгов нет!</p></div>:(
+        <>
+          <div className="debt-summary-card">
+            <div className="ds-row"><span>Учеников с долгом:</span><strong>{debtors.length}</strong></div>
+            <div className="ds-row total"><span>Общий долг:</span><span className="total-debt">{fmt(total)}</span></div>
+          </div>
+          <div className="debt-list">
+            {debtors.map(({student,debtAmount,debtMonths})=>(
+              <div key={student.id} className="debt-item">
+                <div className="debt-name"><span className="avatar-sm">{student.name.charAt(0)}</span>{student.name}</div>
+                <div style={{display:'flex',gap:5,flex:2,flexWrap:'wrap'}}>{debtMonths.map(k=>{const[y,m]=k.split('-');return<span key={k} className="debt-month-tag">{mLabel(+y,+m)}</span>;})}</div>
+                <div className="debt-amount-col">{fmt(debtAmount)}</div>
+              </div>
+            ))}
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
+// ── Страница отчёты ───────────────────────────────────────────────────────────
+function ReportsPage() {
+  const today=new Date();
+  const [year,setYear]=useState(today.getFullYear());
+  const [month,setMonth]=useState(today.getMonth()+1);
+  const {students,sessions,payments}=useData();
+  const prev=()=>{if(month===1){setMonth(12);setYear(y=>y-1);}else setMonth(m=>m-1);};
+  const next=()=>{if(month===12){setMonth(1);setYear(y=>y+1);}else setMonth(m=>m+1);};
+  const active=students.filter(s=>sessions.some(ses=>{if(ses.student_id!==s.id)return false;const d=new Date(ses.date);return d.getFullYear()===year&&d.getMonth()+1===month;}));
+  const paid=[],unpaid=[];
+  active.forEach(s=>{
+    let ok=false;
+    if(s.payment_type==='monthly'){const p=payments.find(p=>p.student_id===s.id&&p.year===year&&p.month===month);ok=p?.paid||false;}
+    else{const myS=sessions.filter(x=>x.student_id===s.id);const allHeld=myS.filter(x=>x.held).sort((a,b)=>a.date.localeCompare(b.date));const fc=s.has_free?(s.free_count||0):0;const mS=myS.filter(x=>{const d=new Date(x.date);return d.getFullYear()===year&&d.getMonth()+1===month&&x.held;});const paidable=mS.filter(x=>allHeld.findIndex(y=>y.id===x.id)+1>fc);ok=paidable.length>0&&paidable.every(x=>x.paid);}
+    (ok?paid:unpaid).push(s);
+  });
+  const expected=active.reduce((s,x)=>s+MONTHLY_RATES[x.frequency],0);
+  const actualMonth=active.reduce((sum,s)=>{
+    if(s.payment_type==='monthly'){const p=payments.find(p=>p.student_id===s.id&&p.year===year&&p.month===month);return sum+(p?.paid?MONTHLY_RATES[s.frequency]:0);}
+    const myS=sessions.filter(x=>x.student_id===s.id);const allHeld=myS.filter(x=>x.held).sort((a,b)=>a.date.localeCompare(b.date));const fc=s.has_free?(s.free_count||0):0;
+    const paidS=myS.filter(x=>{const d=new Date(x.date);return d.getFullYear()===year&&d.getMonth()+1===month&&x.held&&x.paid&&allHeld.findIndex(y=>y.id===x.id)+1>fc;});
+    return sum+paidS.length*sRate(s.frequency);
+  },0);
+  const totalDebt=students.reduce((s,x)=>s+calcDebt(x,sessions,payments).debtAmount,0);
+  const allTime=students.reduce((sum,s)=>{
+    const myS=sessions.filter(x=>x.student_id===s.id);
+    if(s.payment_type==='monthly'){const pM=payments.filter(p=>p.student_id===s.id&&p.paid).length;return sum+pM*MONTHLY_RATES[s.frequency];}
+    const allHeld=myS.filter(x=>x.held).sort((a,b)=>a.date.localeCompare(b.date));const fc=s.has_free?(s.free_count||0):0;
+    const pC=myS.filter(x=>x.held&&x.paid&&allHeld.findIndex(y=>y.id===x.id)+1>fc).length;
+    return sum+pC*sRate(s.frequency);
+  },0);
+  const debtors=students.map(s=>({student:s,...calcDebt(s,sessions,payments)})).filter(d=>d.debtAmount>0);
+  return (
+    <div className="page">
+      <div className="page-header">
+        <div className="page-title"><span className="ti">📊</span><h1>Отчёты</h1></div>
+        <div className="month-nav"><button className="btn-icon" onClick={prev}>◀</button><span className="month-label">{MONTHS[month-1]} {year}</span><button className="btn-icon" onClick={next}>▶</button></div>
+      </div>
+      <div style={{fontSize:13,fontWeight:800,color:'var(--ink3)',textTransform:'uppercase',letterSpacing:.5,marginBottom:12}}>📅 {MONTHS[month-1]} {year}</div>
+      <div className="kpi-grid">
+        <div className="kpi-card"><span className="kpi-val">{students.length}</span><span className="kpi-label">Всего учеников</span></div>
+        <div className="kpi-card"><span className="kpi-val">{active.length}</span><span className="kpi-label">Активны в месяце</span></div>
+        <div className="kpi-card green"><span className="kpi-val">{paid.length}</span><span className="kpi-label">Оплатили</span></div>
+        <div className="kpi-card red"><span className="kpi-val">{unpaid.length}</span><span className="kpi-label">Не оплатили</span></div>
+        <div className="kpi-card blue"><span className="kpi-val">{fmt(expected)}</span><span className="kpi-label">Ожидается</span></div>
+        <div className="kpi-card green"><span className="kpi-val">{fmt(actualMonth)}</span><span className="kpi-label">Получено за месяц</span></div>
+      </div>
+      <div style={{fontSize:13,fontWeight:800,color:'var(--ink3)',textTransform:'uppercase',letterSpacing:.5,marginBottom:12}}>💰 За всё время</div>
+      <div className="kpi-grid" style={{marginBottom:28}}>
+        <div className="kpi-card green"><span className="kpi-val">{fmt(allTime)}</span><span className="kpi-label">Фактически получено</span></div>
+        <div className="kpi-card red"><span className="kpi-val">{fmt(totalDebt)}</span><span className="kpi-label">Общий долг</span></div>
+        <div className="kpi-card blue"><span className="kpi-val">{fmt(allTime+totalDebt)}</span><span className="kpi-label">Начислено всего</span></div>
+      </div>
+      <div className="reports-grid">
+        <div className="report-section"><h3 className="section-title green-title">✓ Оплатили <span className="count-badge">{paid.length}</span></h3>
+          {paid.length===0?<p className="empty-text">Нет данных</p>:<ul className="student-list">{paid.map(s=><li key={s.id}><span className="avatar-sm">{s.name.charAt(0)}</span>{s.name}<span className="badge sm">{fmt(MONTHLY_RATES[s.frequency])}</span></li>)}</ul>}
+        </div>
+        <div className="report-section"><h3 className="section-title red-title">✗ Не оплатили <span className="count-badge debt">{unpaid.length}</span></h3>
+          {unpaid.length===0?<p className="empty-text">Все оплатили!</p>:<ul className="student-list">{unpaid.map(s=><li key={s.id}><span className="avatar-sm">{s.name.charAt(0)}</span>{s.name}<span className="badge sm">{fmt(MONTHLY_RATES[s.frequency])}</span></li>)}</ul>}
+        </div>
+        <div className="report-section full-width"><h3 className="section-title red-title">Должники <span className="count-badge debt">{debtors.length}</span></h3>
+          {debtors.length===0?<p className="empty-text">Долгов нет 🎉</p>:<ul className="student-list">{debtors.map(({student,debtAmount})=><li key={student.id}><span className="avatar-sm">{student.name.charAt(0)}</span>{student.name}<span className="debt-tag">{fmt(debtAmount)}</span></li>)}</ul>}
+        </div>
+        <div className="report-section full-width"><h3 className="section-title">Все ученики <span className="count-badge">{students.length}</span></h3>
+          <table className="report-table"><thead><tr><th>Имя</th><th>Уровень</th><th>Формат</th><th>Тариф</th><th>Оплата</th><th>Начало</th></tr></thead>
+          <tbody>{students.map(s=><tr key={s.id}><td>{s.name}</td><td>{s.level||'—'}</td><td>{s.frequency==='2x'?'2×/нед':'3×/нед'}</td><td>{fmt(MONTHLY_RATES[s.frequency])}</td><td>{s.payment_type==='monthly'?'Помесячная':'По занятиям'}</td><td>{s.start_date?new Date(s.start_date).toLocaleDateString('ru-RU'):'—'}</td></tr>)}</tbody></table>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ── Экран настройки Supabase ──────────────────────────────────────────────────
+function SetupScreen({onDone}) {
+  const [url, setUrl]   = useState('');
+  const [key, setKey]   = useState('');
+  const [err, setErr]   = useState('');
+  const [loading, setLoading] = useState(false);
+
+  const connect = async (e) => {
+    e.preventDefault();
+    if (!url.trim()||!key.trim()){setErr('Заполните оба поля');return;}
+    setLoading(true); setErr('');
+    try {
+      // Проверяем соединение
+      const res = await fetch(`${url.trim()}/rest/v1/students?select=id&limit=1`, {
+        headers: {'apikey':key.trim(),'Authorization':`Bearer ${key.trim()}`}
+      });
+      if (!res.ok) throw new Error(`Ошибка ${res.status} — проверьте URL и ключ`);
+      saveConfig(url.trim(), key.trim());
+      onDone();
+    } catch(e) { setErr(e.message); }
+    setLoading(false);
+  };
+
+  return (
+    <div className="setup-screen">
+      <div className="setup-card">
+        <div className="setup-logo">🇰🇷</div>
+        <div className="setup-title">Корейский Тьютор</div>
+        <div className="setup-sub">Подключите Supabase для начала работы</div>
+        <div className="setup-steps">
+          <div className="setup-step"><div className="step-num">1</div><div className="step-text">Зайдите на <a href="https://supabase.com" target="_blank">supabase.com</a> → ваш проект → Settings → API</div></div>
+          <div className="setup-step"><div className="step-num">2</div><div className="step-text">Скопируйте <b>Project URL</b> и <b>anon public</b> ключ</div></div>
+          <div className="setup-step"><div className="step-num">3</div><div className="step-text">Вставьте ниже и нажмите «Подключить»</div></div>
+        </div>
+        <form onSubmit={connect} className="form">
+          <div className="field"><label>Project URL</label><input value={url} onChange={e=>setUrl(e.target.value)} placeholder="https://xxxxxxxx.supabase.co" required/></div>
+          <div className="field"><label>anon public key</label><input value={key} onChange={e=>setKey(e.target.value)} placeholder="eyJhbGci…" required/></div>
+          {err&&<div className="setup-error">{err}</div>}
+          <button type="submit" className="btn btn-primary" disabled={loading} style={{width:'100%',justifyContent:'center'}}>
+            {loading?'Проверяю соединение…':'Подключить'}
+          </button>
+        </form>
+      </div>
+    </div>
+  );
+}
+
+// ── Основной компонент ────────────────────────────────────────────────────────
+const TABS = [
+  {id:'students', label:'Ученики',   icon:'👥'},
+  {id:'calendar', label:'Календарь', icon:'📅'},
+  {id:'debts',    label:'Долги',     icon:'⚠️'},
+  {id:'reports',  label:'Отчёты',    icon:'📊'},
+];
+
+function Shell() {
+  const [tab, setTab] = useState('students');
+  const {students, sessions, payments} = useData();
+  const debtorCount = students.filter(s=>calcDebt(s,sessions,payments).debtAmount>0).length;
+  return (
+    <div className="app-shell">
+      <nav className="sidebar">
+        <div className="sidebar-logo">
+          <span className="logo-ko">한</span>
+          <div><div className="logo-title">Корейский Тьютор</div><div className="logo-sub">учёт оплат</div></div>
+        </div>
+        <ul className="nav-list">
+          {TABS.map(({id,label,icon})=>(
+            <li key={id}><button className={`nav-item ${tab===id?'active':''}`} onClick={()=>setTab(id)}>
+              <span>{icon}</span><span>{label}</span>
+              {id==='debts'&&debtorCount>0&&<span className="nav-badge">{debtorCount}</span>}
+            </button></li>
+          ))}
+        </ul>
+        <div className="sidebar-footer">
+          <span>v2.0 · Supabase</span>
+          <button onClick={()=>{if(confirm('Отключить Supabase и сбросить конфигурацию?')){clearConfig();}}} title="Сменить базу данных">⚙️</button>
+        </div>
+      </nav>
+      <main className="main-content">
+        {tab==='students'&&<StudentsPage/>}
+        {tab==='calendar'&&<CalendarPage/>}
+        {tab==='debts'   &&<DebtsPage/>}
+        {tab==='reports' &&<ReportsPage/>}
+      </main>
+    </div>
+  );
+}
+
+function App() {
+  const [configured, setConfigured] = useState(!!getConfig());
+  if (!configured) return <SetupScreen onDone={()=>setConfigured(true)}/>;
+  return <DataProvider><Shell/></DataProvider>;
+}
+
+ReactDOM.createRoot(document.getElementById('root')).render(<App/>);
+</script>
+</body>
+</html>
