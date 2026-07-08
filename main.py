@@ -18,6 +18,8 @@ from aiogram.types import (
 )
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
+import sys, os
+sys.path.insert(0, os.path.dirname(__file__))
 from config import BOT_TOKEN, TUTOR_ID, TEXTS
 import db
 
