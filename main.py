@@ -92,9 +92,15 @@ def generate_sessions(student_id: str, day_indices: list, time_str: str, year: i
 # ── /start ────────────────────────────────────────────────────────────────────
 
 @dp.message(CommandStart())
-async def cmd_start(msg: Message):
+async def cmd_start(msg: Message, state: FSMContext):
     lang = get_lang(msg.from_user)
     student = db.get_student_by_telegram(msg.from_user.id)
+
+    # Если пришёл по ссылке ?start=apply — сразу запускаем анкету
+    if msg.text and "apply" in msg.text and not student:
+        await cmd_apply(msg, state)
+        return
+
     greeting = f"Добро пожаловать, {student['name']}! 👋\n\n" if student else ""
     await msg.answer(greeting + t(lang, "start"))
 
