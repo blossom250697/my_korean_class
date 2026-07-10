@@ -12,11 +12,27 @@ from aiogram.filters import Command, CommandStart
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.fsm.storage.memory import MemoryStorage
-from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
+from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton, ReplyKeyboardMarkup, KeyboardButton, ReplyKeyboardRemove
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
 from config import BOT_TOKEN, TUTOR_ID, TEXTS
 import db
+
+
+# ── Главное меню (кнопки под полем ввода) ────────────────────────────────────
+
+def main_menu_kb(lang: str) -> ReplyKeyboardMarkup:
+    if lang == "ru":
+        buttons = [
+            [KeyboardButton(text="📝 Записаться на занятия"), KeyboardButton(text="📅 Моё расписание")],
+            [KeyboardButton(text="💳 Оплата"),                KeyboardButton(text="❓ Помощь")],
+        ]
+    else:
+        buttons = [
+            [KeyboardButton(text="📝 Apply for lessons"),  KeyboardButton(text="📅 My schedule")],
+            [KeyboardButton(text="💳 Payment"),            KeyboardButton(text="❓ Help")],
+        ]
+    return ReplyKeyboardMarkup(keyboard=buttons, resize_keyboard=True, persistent=True)
 
 logging.basicConfig(level=logging.INFO)
 log = logging.getLogger(__name__)
@@ -38,10 +54,10 @@ class ApplyForm(StatesGroup):
 # ── FSM: подтверждение расписания преподавателем ──────────────────────────────
 
 class ConfirmSchedule(StatesGroup):
-    select_app  = State()  # выбор заявки (если несколько)
-    frequency   = State()  # частота занятий
+    select_app  = State()  # выбор заявки
+    frequency   = State()  # частота
     days        = State()  # дни недели
-    time_slot   = State()  # время начала занятия
+    day_times   = State()  # время для каждого дня
     has_free    = State()  # бесплатные занятия
     confirm     = State()  # подтверждение
 
@@ -73,6 +89,25 @@ def days_kb(selected: list) -> InlineKeyboardMarkup:
     buttons.append([InlineKeyboardButton(text="✓ Готово", callback_data="tdays_done")])
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
+def generate_sessions_with_time(student_id: str, day_times: dict, year: int, month: int) -> list:
+    """Генерирует занятия с временем для каждого дня недели. day_times = {'0': '11:00', '2': '15:00'}"""
+    sessions = []
+    _, last_day = calendar.monthrange(year, month)
+    today = date.today()
+    for day in range(1, last_day + 1):
+        d = date(year, month, day)
+        dow = str(d.weekday())
+        if dow in day_times and d >= today:
+            sessions.append({
+                "id":         str(uuid.uuid4()),
+                "student_id": student_id,
+                "date":       d.isoformat(),
+                "time":       day_times[dow],
+                "held":       False,
+                "paid":       False,
+            })
+    return sessions
+
 def generate_sessions(student_id: str, day_indices: list, time_str: str, year: int, month: int) -> list:
     """Генерирует занятия на месяц по дням недели начиная с сегодня"""
     sessions = []
@@ -103,12 +138,15 @@ async def cmd_start(msg: Message, state: FSMContext):
         return
 
     if student:
-        await msg.answer(f"Добро пожаловать, {student['name']}! 👋\n\n" + t(lang, "start"))
+        await msg.answer(
+            f"Добро пожаловать, {student['name']}! 👋",
+            reply_markup=main_menu_kb(lang)
+        )
     else:
-        hint = ("\n\n💡 Если вы уже записаны — напишите /link Имя чтобы привязать аккаунт"
+        hint = ("\n\n💡 Если вы уже записаны — нажмите кнопку или напишите /link Имя"
                 if lang=="ru" else
-                "\n\n💡 If you are already enrolled — write /link YourName to connect your account")
-        await msg.answer(t(lang, "start") + hint)
+                "\n\n💡 If you are already enrolled — tap a button or write /link YourName")
+        await msg.answer(t(lang, "start") + hint, reply_markup=main_menu_kb(lang))
 
 # ── /apply — заявка от ученика ────────────────────────────────────────────────
 
@@ -193,7 +231,7 @@ async def apply_done(msg: Message, state: FSMContext):
         "status":         "new",
         "username":       tg_username,
     })
-    await msg.answer(t(lang, "applied"))
+    await msg.answer(t(lang, "applied"), reply_markup=main_menu_kb(lang))
 
     freq_label = {"2x":"2 раза/нед","3x":"3 раза/нед"}.get(data.get("frequency",""),"")
     tg_username = data.get('username') or msg.from_user.username
@@ -308,27 +346,54 @@ async def toggle_day(cb: CallbackQuery, state: FSMContext):
 @dp.callback_query(ConfirmSchedule.days, F.data == "tdays_done")
 async def days_done(cb: CallbackQuery, state: FSMContext):
     data = await state.get_data()
-    if not data.get("selected_days"):
+    selected = sorted(data.get("selected_days", []))
+    if not selected:
         await cb.answer("Выбери хотя бы один день!", show_alert=True); return
+    # Начинаем спрашивать время для первого дня
+    await state.update_data(selected_days=selected, day_times={}, time_day_idx=0)
+    first_day = DAYS_RU[selected[0]]
     await cb.message.edit_text(
-        "⏰ <b>Укажи время начала занятия</b>\n\nНапример: <code>11:00</code>",
+        f"⏰ <b>Время для {first_day}?</b>\n\nНапример: <code>11:00</code>",
         parse_mode="HTML"
     )
-    await state.set_state(ConfirmSchedule.time_slot)
+    await state.set_state(ConfirmSchedule.day_times)
     await cb.answer()
 
-@dp.message(ConfirmSchedule.time_slot)
-async def confirm_time(msg: Message, state: FSMContext):
-    await state.update_data(time_slot=msg.text.strip())
-    await msg.answer(
-        "🎁 <b>Бесплатные занятия?</b>",
-        parse_mode="HTML",
-        reply_markup=InlineKeyboardMarkup(inline_keyboard=[[
-            InlineKeyboardButton(text="✅ Да, 8 занятий", callback_data="free_yes"),
-            InlineKeyboardButton(text="❌ Нет", callback_data="free_no"),
-        ]])
-    )
-    await state.set_state(ConfirmSchedule.has_free)
+
+
+@dp.message(ConfirmSchedule.day_times)
+async def confirm_day_time(msg: Message, state: FSMContext):
+    data = await state.get_data()
+    selected = data["selected_days"]
+    day_times = data.get("day_times", {})
+    idx = data.get("time_day_idx", 0)
+
+    # Сохраняем время для текущего дня
+    time_input = msg.text.strip()
+    day_times[str(selected[idx])] = time_input
+    await state.update_data(day_times=day_times)
+
+    # Переходим к следующему дню
+    next_idx = idx + 1
+    if next_idx < len(selected):
+        await state.update_data(time_day_idx=next_idx)
+        next_day = DAYS_RU[selected[next_idx]]
+        await msg.answer(
+            f"⏰ <b>Время для {next_day}?</b>\n\nНапример: <code>15:00</code>",
+            parse_mode="HTML"
+        )
+    else:
+        # Все дни заполнены — спрашиваем бесплатные занятия
+        await state.update_data(time_day_idx=0)
+        await msg.answer(
+            "🎁 <b>Бесплатные занятия?</b>",
+            parse_mode="HTML",
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=[[
+                InlineKeyboardButton(text="✅ Да, 8 занятий", callback_data="free_yes"),
+                InlineKeyboardButton(text="❌ Нет", callback_data="free_no"),
+            ]])
+        )
+        await state.set_state(ConfirmSchedule.has_free)
 
 @dp.callback_query(ConfirmSchedule.has_free, F.data.startswith("free_"))
 async def confirm_free(cb: CallbackQuery, state: FSMContext):
@@ -493,12 +558,12 @@ async def cmd_link(msg: Message):
         "username":      username or "",
     })
 
+    lang_student = student.get("telegram_lang", "ru")
     await msg.answer(
         f"✅ Готово! Вы привязаны как <b>{student['name']}</b>\n\n"
-        f"Теперь вам доступны команды:\n"
-        f"/schedule — ближайшие занятия\n"
-        f"/payment — статус оплаты",
-        parse_mode="HTML"
+        f"{'Теперь вам доступны все функции бота 👇' if lang_student=='ru' else 'You now have access to all bot features 👇'}",
+        parse_mode="HTML",
+        reply_markup=main_menu_kb(lang_student)
     )
 
     # Уведомляем преподавателя
@@ -524,9 +589,20 @@ async def cmd_schedule(msg: Message):
     upcoming = [s for s in sessions if s["date"] >= date.today().isoformat() and not s["held"]]
     if not upcoming:
         await msg.answer("📅 Ближайших занятий нет." if lang=="ru" else "📅 No upcoming lessons."); return
-    lines = ["📅 <b>Ближайшие занятия:</b>\n" if lang=="ru" else "📅 <b>Upcoming lessons:</b>\n"]
+    # Постоянное расписание по дням недели
+    sched = db.get_student_schedule(student["id"])
+    lines = ["📅 <b>Ваше расписание:</b>\n" if lang=="ru" else "📅 <b>Your schedule:</b>\n"]
+    if sched:
+        for row in sched:
+            lines.append(f"  {DAYS_RU[row['dow']]} — {row['time']}")
+        lines.append("")
+
+    lines.append("<b>Ближайшие занятия:</b>" if lang=="ru" else "<b>Upcoming lessons:</b>")
     for s in upcoming[:5]:
-        lines.append(f"• {datetime.fromisoformat(s['date']).strftime('%d.%m.%Y')}")
+        d = datetime.fromisoformat(s['date']).strftime('%d.%m')
+        dow = DAYS_RU[(datetime.fromisoformat(s['date']).weekday())]
+        time_str = f" в {s['time']}" if s.get('time') else ""
+        lines.append(f"• {dow} {d}{time_str}")
     await msg.answer("\n".join(lines), parse_mode="HTML")
 
 # ── /payment ──────────────────────────────────────────────────────────────────
@@ -603,6 +679,30 @@ async def cmd_help(msg: Message):
     else:
         lang = get_lang(msg.from_user)
         await msg.answer(t(lang, "start"))
+
+
+# ── Обработчик кнопок главного меню ──────────────────────────────────────────
+
+@dp.message(F.text.in_({
+    "📝 Записаться на занятия", "📝 Apply for lessons",
+    "📅 Моё расписание",        "📅 My schedule",
+    "💳 Оплата",                "💳 Payment",
+    "❓ Помощь",                "❓ Help",
+}))
+async def handle_menu_buttons(msg: Message, state: FSMContext):
+    text = msg.text
+
+    if text in ("📝 Записаться на занятия", "📝 Apply for lessons"):
+        await cmd_apply(msg, state)
+
+    elif text in ("📅 Моё расписание", "📅 My schedule"):
+        await cmd_schedule(msg)
+
+    elif text in ("💳 Оплата", "💳 Payment"):
+        await cmd_payment(msg)
+
+    elif text in ("❓ Помощь", "❓ Help"):
+        await cmd_help(msg)
 
 # ── Напоминания ───────────────────────────────────────────────────────────────
 

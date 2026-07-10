@@ -121,6 +121,9 @@ select.ss{min-width:200px}
 .month-pay-toggle{display:flex;align-items:center;gap:8px;cursor:pointer;font-weight:700}
 .month-pay-toggle input{accent-color:var(--green);width:16px;height:16px}
 .pay-paid{color:var(--green)}.pay-unpaid{color:var(--red)}
+.time-input-sm{width:80px;padding:2px 5px;border:1.5px solid var(--border);border-radius:5px;font-size:11px;font-weight:700;outline:none;background:#fff;color:var(--ink)}
+.time-input-sm:focus{border-color:var(--blue)}
+.session-time-badge{font-size:10px;font-weight:700;color:var(--blue);background:var(--blue-lt);padding:1px 5px;border-radius:4px;}
 /* Долги */
 .debt-summary-card{background:var(--surface);border:1.5px solid var(--border);border-radius:var(--radius);padding:16px 18px;box-shadow:var(--shadow);max-width:400px;margin-bottom:22px;display:flex;flex-direction:column;gap:9px}
 .ds-row{display:flex;justify-content:space-between;font-size:14px}
@@ -312,11 +315,15 @@ function DataProvider({children}) {
   });
 
   // Занятия
-  const addSession = (studentId, date) => withSync(async () => {
+  const addSession = (studentId, date, time='') => withSync(async () => {
     if (sessions.find(s=>s.student_id===studentId&&s.date===date)) return;
-    const sb=getSB(), row={id:genId(),student_id:studentId,date,held:false,paid:false};
+    const sb=getSB(), row={id:genId(),student_id:studentId,date,time,held:false,paid:false};
     await sb.insert('sessions',row);
     setSessions(p=>[...p,row]);
+  });
+  const updateSessionTime = (id, time) => withSync(async () => {
+    const sb=getSB(); await sb.update('sessions',{time},id);
+    setSessions(p=>p.map(s=>s.id===id?{...s,time}:s));
   });
   const removeSession = (id) => withSync(async () => {
     const sb=getSB(); await sb.delete('sessions','id',id);
@@ -344,7 +351,7 @@ function DataProvider({children}) {
   });
 
   return (
-    <DataCtx.Provider value={{students,sessions,payments,loading,addStudent,updateStudent,deleteStudent,addSession,removeSession,toggleSession,setMonthPayment,reload:loadAll}}>
+    <DataCtx.Provider value={{students,sessions,payments,loading,addStudent,updateStudent,deleteStudent,addSession,removeSession,toggleSession,setMonthPayment,updateSessionTime,reload:loadAll}}>
       {children}
       {sync && (
         <div className={`sync-bar ${sync==='saving'?'':sync}`}>
@@ -464,7 +471,8 @@ function CalendarPage() {
   const [year,setYear]=useState(today.getFullYear());
   const [month,setMonth]=useState(today.getMonth()+1);
   const [selId,setSelId]=useState('');
-  const {students,sessions,payments,addSession,removeSession,toggleSession,setMonthPayment}=useData();
+  const {students,sessions,payments,addSession,removeSession,toggleSession,setMonthPayment,updateSessionTime}=useData();
+  const [timePopup,setTimePopup]=useState(null); // {sessionId, date, currentTime}
 
   const prev=()=>{if(month===1){setMonth(12);setYear(y=>y-1);}else setMonth(m=>m-1);};
   const next=()=>{if(month===12){setMonth(1);setYear(y=>y+1);}else setMonth(m=>m+1);};
@@ -508,10 +516,16 @@ function CalendarPage() {
                 const isFree=hIdx>0&&hIdx<=freeCount;
                 return (
                   <div key={k} className={`cal-day ${s?'has-session':''} ${isToday?'today':''} ${s?.held&&!isFree?'held':''}`}
-                    onClick={()=>student&&(s?removeSession(s.id):addSession(student.id,k))}>
+                    onClick={()=>{
+      if(!student) return;
+      if(s) removeSession(s.id);
+      else setTimePopup({date:k, studentId:student.id, isNew:true, time:''});
+    }}>
                     <span className="day-num">{day}</span>
                     {s&&<div className="session-controls" onClick={e=>e.stopPropagation()}>
                       {isFree?<span style={{fontSize:9,color:'var(--purple)',fontWeight:700}}>бесплатно</span>:<>
+                        {s.time&&<span className="session-time-badge" onClick={()=>setTimePopup({sessionId:s.id,date:k,isNew:false,time:s.time||''})}>⏰ {s.time}</span>}
+                        {!s.time&&<span style={{fontSize:9,color:'var(--ink3)',cursor:'pointer'}} onClick={()=>setTimePopup({sessionId:s.id,date:k,isNew:false,time:''})}>+ время</span>}
                         <label className="check-wrap"><input type="checkbox" checked={s.held} onChange={()=>toggleSession(s.id,'held')}/>✓</label>
                         {student.payment_type==='perSession'&&<label className="check-wrap paid-check"><input type="checkbox" checked={s.paid} onChange={()=>toggleSession(s.id,'paid')}/>₩</label>}
                       </>}
@@ -535,13 +549,43 @@ function CalendarPage() {
               <div className="summary-row"><span>Оплачено занятий:</span><strong>{myS.filter(s=>s.paid).length} / {myS.length}</strong></div>
             )}
           </div>
-        </>
+        {/* Попап ввода времени */}
+      {timePopup&&(
+        <div className="modal-overlay" onClick={()=>setTimePopup(null)}>
+          <div className="modal" style={{maxWidth:320}} onClick={e=>e.stopPropagation()}>
+            <div className="modal-header">
+              <h2>⏰ Время занятия</h2>
+              <button className="btn-icon" onClick={()=>setTimePopup(null)}>✕</button>
+            </div>
+            <div className="form">
+              <div className="field">
+                <label>Дата: {timePopup.date}</label>
+                <input
+                  type="time"
+                  defaultValue={timePopup.time}
+                  className="search-input"
+                  style={{width:'100%',fontSize:18,fontWeight:700,padding:'10px 14px'}}
+                  id="time-input-popup"
+                  autoFocus
+                />
+              </div>
+              <div className="form-actions">
+                <button className="btn btn-ghost" onClick={()=>setTimePopup(null)}>Отмена</button>
+                <button className="btn btn-primary" onClick={()=>{
+                  const val = document.getElementById('time-input-popup').value;
+                  if (timePopup.isNew) {
+                    addSession(timePopup.studentId, timePopup.date, val);
+                  } else {
+                    updateSessionTime(timePopup.sessionId, val);
+                  }
+                  setTimePopup(null);
+                }}>Сохранить</button>
+              </div>
+            </div>
+          </div>
+        </div>
       )}
-    </div>
-  );
-}
 
-// ── Страница долги ────────────────────────────────────────────────────────────
 function DebtsPage() {
   const {students,sessions,payments}=useData();
   const debtors=students.map(s=>({student:s,...calcDebt(s,sessions,payments)})).filter(d=>d.debtAmount>0).sort((a,b)=>b.debtAmount-a.debtAmount);
