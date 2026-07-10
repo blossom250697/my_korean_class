@@ -32,6 +32,7 @@ class ApplyForm(StatesGroup):
     level     = State()
     frequency = State()
     wishes    = State()  # пожелания по времени (свободный текст)
+    username  = State()  # Telegram username
     message   = State()  # доп. сообщение
 
 # ── FSM: подтверждение расписания преподавателем ──────────────────────────────
@@ -101,8 +102,13 @@ async def cmd_start(msg: Message, state: FSMContext):
         await cmd_apply(msg, state)
         return
 
-    greeting = f"Добро пожаловать, {student['name']}! 👋\n\n" if student else ""
-    await msg.answer(greeting + t(lang, "start"))
+    if student:
+        await msg.answer(f"Добро пожаловать, {student['name']}! 👋\n\n" + t(lang, "start"))
+    else:
+        hint = ("\n\n💡 Если вы уже записаны — напишите /link Имя чтобы привязать аккаунт"
+                if lang=="ru" else
+                "\n\n💡 If you are already enrolled — write /link YourName to connect your account")
+        await msg.answer(t(lang, "start") + hint)
 
 # ── /apply — заявка от ученика ────────────────────────────────────────────────
 
@@ -159,12 +165,23 @@ async def apply_freq(cb: CallbackQuery, state: FSMContext):
 async def apply_wishes(msg: Message, state: FSMContext):
     data = await state.get_data(); lang = data["lang"]
     await state.update_data(wishes=msg.text)
+    ask_un = "Укажите ваш Telegram username (например @username)\nЭто нужно чтобы преподаватель мог написать вам напрямую." if lang=="ru" else "Please share your Telegram username (e.g. @username)\nSo the teacher can contact you directly."
+    await msg.answer(ask_un)
+    await state.set_state(ApplyForm.username)
+
+@dp.message(ApplyForm.username)
+async def apply_username(msg: Message, state: FSMContext):
+    data = await state.get_data(); lang = data["lang"]
+    username = msg.text.strip().lstrip('@') if msg.text.strip() not in ('-','нет','no','—') else None
+    await state.update_data(username=username)
     await msg.answer(t(lang, "ask_message"))
     await state.set_state(ApplyForm.message)
 
 @dp.message(ApplyForm.message)
 async def apply_done(msg: Message, state: FSMContext):
     data = await state.get_data(); lang = data["lang"]
+    # Берём username из Telegram если не указал вручную
+    tg_username = data.get('username') or msg.from_user.username
     app = db.create_application({
         "telegram_id":    msg.from_user.id,
         "name":           data["name"],
@@ -174,10 +191,13 @@ async def apply_done(msg: Message, state: FSMContext):
         "message":        msg.text if msg.text.lower() not in ("нет","no","-") else None,
         "lang":           lang,
         "status":         "new",
+        "username":       tg_username,
     })
     await msg.answer(t(lang, "applied"))
 
     freq_label = {"2x":"2 раза/нед","3x":"3 раза/нед"}.get(data.get("frequency",""),"")
+    tg_username = data.get('username') or msg.from_user.username
+    username_line = f"@{tg_username}" if tg_username else f"ID: {msg.from_user.id}"
     notif = (
         f"📬 <b>Новая заявка!</b>\n\n"
         f"👤 {data['name']}\n"
@@ -186,10 +206,16 @@ async def apply_done(msg: Message, state: FSMContext):
         f"⏰ Пожелания по времени: {data.get('wishes','—')}\n"
         f"💬 {msg.text}\n"
         f"🌐 {'🇷🇺' if lang=='ru' else '🇺🇸'}\n"
-        f"🆔 <code>{msg.from_user.id}</code>\n\n"
-        f"Когда договоритесь о расписании — используй /schedule_set для добавления в систему."
+        f"✉️ Контакт: {username_line}\n\n"
+        f"Когда договоритесь о расписании — используй /schedule_set"
     )
-    await bot.send_message(TUTOR_ID, notif, parse_mode="HTML")
+    # Кнопка «Написать» если есть username
+    kb = None
+    if tg_username:
+        kb = InlineKeyboardMarkup(inline_keyboard=[[
+            InlineKeyboardButton(text=f"✉️ Написать @{tg_username}", url=f"https://t.me/{tg_username}")
+        ]])
+    await bot.send_message(TUTOR_ID, notif, parse_mode="HTML", reply_markup=kb)
     await state.clear()
 
 # ── /schedule_set — преподаватель утверждает расписание ───────────────────────
@@ -409,6 +435,82 @@ async def sched_confirm(cb: CallbackQuery, state: FSMContext):
     await bot.send_message(app["telegram_id"], t(lang, "approved"))
     await state.clear()
     await cb.answer()
+
+
+# ── /link — привязка существующего ученика ───────────────────────────────────
+
+@dp.message(Command("link"))
+async def cmd_link(msg: Message):
+    student = db.get_student_by_telegram(msg.from_user.id)
+    if student:
+        lang = student.get("telegram_lang", "ru")
+        await msg.answer(
+            f"Вы уже привязаны как {student['name']} ✅" if lang=="ru"
+            else f"You are already linked as {student['name']} ✅"
+        )
+        return
+
+    # Ищем по имени — ученик должен написать /link Имя
+    parts = msg.text.strip().split(maxsplit=1)
+    if len(parts) < 2:
+        await msg.answer(
+            "Напишите команду с вашим именем:\n"
+            "<code>/link Екатерина</code> или <code>/link Александр</code>\n\n"
+            "Имя должно совпадать с тем, что вы указали при записи.",
+            parse_mode="HTML"
+        )
+        return
+
+    search_name = parts[1].strip().lower()
+    all_students = db.get_all_students()
+
+    # Ищем совпадение по имени (частичное)
+    found = [s for s in all_students if search_name in s["name"].lower()]
+
+    if not found:
+        await msg.answer(
+            f"Ученик с именем <b>{parts[1]}</b> не найден.\n\n"
+            f"Проверьте написание имени или подайте заявку: /apply",
+            parse_mode="HTML"
+        )
+        return
+
+    if len(found) > 1:
+        names = "\n".join(f"• {s['name']}" for s in found)
+        await msg.answer(
+            f"Найдено несколько совпадений:\n{names}\n\n"
+            f"Уточните полное имя, например:\n<code>/link Дьяченко Екатерина</code>",
+            parse_mode="HTML"
+        )
+        return
+
+    # Нашли одного — привязываем
+    student = found[0]
+    username = msg.from_user.username
+    db.update_student(student["id"], {
+        "telegram_id":   msg.from_user.id,
+        "telegram_lang": "ru",
+        "username":      username or "",
+    })
+
+    await msg.answer(
+        f"✅ Готово! Вы привязаны как <b>{student['name']}</b>\n\n"
+        f"Теперь вам доступны команды:\n"
+        f"/schedule — ближайшие занятия\n"
+        f"/payment — статус оплаты",
+        parse_mode="HTML"
+    )
+
+    # Уведомляем преподавателя
+    await bot.send_message(
+        TUTOR_ID,
+        f"🔗 <b>Ученик привязал аккаунт</b>\n\n"
+        f"👤 {student['name']}\n"
+        f"✉️ {'@' + username if username else 'без username'}\n"
+        f"🆔 <code>{msg.from_user.id}</code>",
+        parse_mode="HTML"
+    )
+
 
 # ── /schedule — расписание ученика ────────────────────────────────────────────
 
