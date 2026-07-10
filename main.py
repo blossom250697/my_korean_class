@@ -1043,6 +1043,39 @@ async def send_payment_reminders():
         except Exception as e:
             log.warning(f"Ошибка: {e}")
 
+
+# ── Любое сообщение — показываем меню ────────────────────────────────────────
+
+@dp.message(F.text)
+async def handle_any_message(msg: Message, state: FSMContext):
+    # Пропускаем преподавателя
+    if msg.from_user.id == TUTOR_ID: return
+
+    # Проверяем нет ли активного FSM состояния
+    current = await state.get_state()
+    if current is not None: return
+
+    lang = get_lang(msg.from_user)
+    student = db.get_student_by_telegram(msg.from_user.id)
+    pending = db.get_pending_application(msg.from_user.id)
+
+    if student:
+        await msg.answer(
+            "Выберите действие 👇" if lang=="ru" else "Choose an action 👇",
+            reply_markup=main_menu_kb(lang)
+        )
+    elif pending:
+        await msg.answer(
+            "⏳ Ваша заявка на рассмотрении." if lang=="ru" else "⏳ Your application is pending.",
+            reply_markup=main_menu_kb(lang, has_pending=True)
+        )
+    else:
+        await msg.answer(
+            t(lang, "start") + ("\n\n💡 Если вы уже записаны — напишите /link Имя" if lang=="ru"
+                                else "\n\n💡 If enrolled — write /link YourName"),
+            reply_markup=main_menu_kb(lang)
+        )
+
 # ── Запуск ────────────────────────────────────────────────────────────────────
 
 async def main():
