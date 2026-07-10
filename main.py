@@ -729,7 +729,7 @@ async def handle_tutor_buttons(msg: Message, state: FSMContext):
     text = msg.text
 
     if text == "📋 Заявки":
-        await cmd_schedule_set(msg, state)
+        await cmd_cancel_app(msg)
 
     elif text == "👥 Ученики":
         await cmd_students(msg)
@@ -961,6 +961,61 @@ async def remind_send(cb: CallbackQuery, state: FSMContext):
         )
 
     await state.clear()
+    await cb.answer()
+
+
+# ── /cancel_app — отмена заявок преподавателем ───────────────────────────────
+
+@dp.message(Command("cancel_app"))
+async def cmd_cancel_app(msg: Message):
+    if msg.from_user.id != TUTOR_ID: return
+
+    apps = db.get_new_applications()
+    if not apps:
+        await msg.answer("📭 Нет активных заявок.")
+        return
+
+    buttons = []
+    for app in apps:
+        freq = {"2x":"2×/нед","3x":"3×/нед"}.get(app.get("frequency",""),"")
+        buttons.append([InlineKeyboardButton(
+            text=f"🚫 {app['name']} ({freq})",
+            callback_data=f"cancelapp_{app['id']}_{app['telegram_id']}_{app.get('lang','ru')}"
+        )])
+    buttons.append([InlineKeyboardButton(text="❌ Закрыть", callback_data="cancelapp_close")])
+
+    await msg.answer(
+        "📋 <b>Активные заявки — выбери какую отменить:</b>",
+        parse_mode="HTML",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons)
+    )
+
+@dp.callback_query(F.data.startswith("cancelapp_"))
+async def do_cancel_app(cb: CallbackQuery):
+    if cb.from_user.id != TUTOR_ID: return
+
+    if cb.data == "cancelapp_close":
+        await cb.message.edit_text("Закрыто.")
+        await cb.answer(); return
+
+    parts = cb.data.split("_", 3)
+    _, app_id, tg_id, lang = parts
+
+    db.update_application(app_id, "cancelled")
+
+    # Уведомляем ученика
+    text_ru = "😔 К сожалению, ваша заявка была отменена.\n\nВы можете подать новую заявку в любое время."
+    text_en = "😔 Unfortunately, your application was cancelled.\n\nYou can apply again at any time."
+    try:
+        await bot.send_message(
+            int(tg_id),
+            text_ru if lang == "ru" else text_en,
+            reply_markup=main_menu_kb(lang, has_pending=False)
+        )
+    except Exception:
+        pass
+
+    await cb.message.edit_text(f"✅ Заявка отменена. Ученик уведомлён.")
     await cb.answer()
 
 # ── Напоминания ───────────────────────────────────────────────────────────────
