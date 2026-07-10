@@ -93,6 +93,20 @@ def get_new_applications():
 def update_application(app_id: str, status: str):
     sb._patch('applications', {'status': status}, {'id': app_id})
 
+def get_pending_application(telegram_id: int):
+    """Активная заявка ученика (статус new)"""
+    try:
+        r = sb._get('applications', {
+            'telegram_id': f'eq.{telegram_id}',
+            'status': 'eq.new',
+            'select': '*',
+            'order': 'created_at.desc',
+            'limit': '1',
+        })
+        return r[0] if r else None
+    except Exception:
+        return None
+
 # ── Занятия ───────────────────────────────────────────────────────────────────
 
 def get_sessions_for_student(student_id: str):

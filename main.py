@@ -29,17 +29,21 @@ def tutor_menu_kb() -> ReplyKeyboardMarkup:
     ]
     return ReplyKeyboardMarkup(keyboard=buttons, resize_keyboard=True, persistent=True)
 
-def main_menu_kb(lang: str) -> ReplyKeyboardMarkup:
+def main_menu_kb(lang: str, has_pending: bool = False) -> ReplyKeyboardMarkup:
     if lang == "ru":
         buttons = [
             [KeyboardButton(text="📝 Записаться на занятия"), KeyboardButton(text="📅 Моё расписание")],
             [KeyboardButton(text="💳 Оплата"),                KeyboardButton(text="❓ Помощь")],
         ]
+        if has_pending:
+            buttons.append([KeyboardButton(text="🚫 Отозвать заявку")])
     else:
         buttons = [
             [KeyboardButton(text="📝 Apply for lessons"),  KeyboardButton(text="📅 My schedule")],
             [KeyboardButton(text="💳 Payment"),            KeyboardButton(text="❓ Help")],
         ]
+        if has_pending:
+            buttons.append([KeyboardButton(text="🚫 Cancel application")])
     return ReplyKeyboardMarkup(keyboard=buttons, resize_keyboard=True, persistent=True)
 
 logging.basicConfig(level=logging.INFO)
@@ -164,10 +168,17 @@ async def cmd_start(msg: Message, state: FSMContext):
             reply_markup=main_menu_kb(lang)
         )
     else:
-        hint = ("\n\n💡 Если вы уже записаны — нажмите кнопку или напишите /link Имя"
-                if lang=="ru" else
-                "\n\n💡 If you are already enrolled — tap a button or write /link YourName")
-        await msg.answer(t(lang, "start") + hint, reply_markup=main_menu_kb(lang))
+        # Проверяем есть ли активная заявка
+        pending = db.get_pending_application(msg.from_user.id)
+        has_pending = pending is not None
+        hint = ""
+        if has_pending:
+            hint = "\n\n⏳ Ваша заявка на рассмотрении." if lang=="ru" else "\n\n⏳ Your application is pending."
+        elif not student:
+            hint = ("\n\n💡 Если вы уже записаны — напишите /link Имя"
+                    if lang=="ru" else
+                    "\n\n💡 If you are already enrolled — write /link YourName")
+        await msg.answer(t(lang, "start") + hint, reply_markup=main_menu_kb(lang, has_pending))
 
 # ── /apply — заявка от ученика ────────────────────────────────────────────────
 
@@ -252,7 +263,7 @@ async def apply_done(msg: Message, state: FSMContext):
         "status":         "new",
         "username":       tg_username,
     })
-    await msg.answer(t(lang, "applied"), reply_markup=main_menu_kb(lang))
+    await msg.answer(t(lang, "applied"), reply_markup=main_menu_kb(lang, has_pending=True))
 
     freq_label = {"2x":"2 раза/нед","3x":"3 раза/нед"}.get(data.get("frequency",""),"")
     tg_username = data.get('username') or msg.from_user.username
@@ -743,6 +754,45 @@ async def handle_tutor_buttons(msg: Message, state: FSMContext):
             reply_markup=tutor_menu_kb()
         )
 
+
+# ── Отзыв заявки учеником ────────────────────────────────────────────────────
+
+@dp.message(F.text.in_({"🚫 Отозвать заявку", "🚫 Cancel application"}))
+async def cancel_own_application(msg: Message):
+    lang = get_lang(msg.from_user)
+    student = db.get_student_by_telegram(msg.from_user.id)
+    if student:
+        await msg.answer(
+            "Вы уже являетесь нашим учеником — отзывать нечего." if lang=="ru"
+            else "You are already our student — nothing to cancel."
+        )
+        return
+
+    pending = db.get_pending_application(msg.from_user.id)
+    if not pending:
+        await msg.answer(
+            "У вас нет активных заявок." if lang=="ru"
+            else "You have no active applications."
+        )
+        return
+
+    db.update_application(pending["id"], "cancelled")
+
+    await msg.answer(
+        "🚫 Заявка отозвана.\n\nВы можете подать новую заявку в любое время." if lang=="ru"
+        else "🚫 Application cancelled.\n\nYou can apply again at any time.",
+        reply_markup=main_menu_kb(lang, has_pending=False)
+    )
+
+    # Уведомляем преподавателя
+    await bot.send_message(
+        TUTOR_ID,
+        f"🚫 <b>Ученик отозвал заявку</b>\n\n"
+        f"👤 {pending['name']}\n"
+        f"🆔 <code>{msg.from_user.id}</code>",
+        parse_mode="HTML"
+    )
+
 # ── Обработчик кнопок главного меню ──────────────────────────────────────────
 
 @dp.message(F.text.in_({
@@ -762,6 +812,9 @@ async def handle_menu_buttons(msg: Message, state: FSMContext):
 
     elif text in ("💳 Оплата", "💳 Payment"):
         await cmd_payment(msg)
+
+    elif text in ("🚫 Отозвать заявку", "🚫 Cancel application"):
+        await cancel_own_application(msg)
 
     elif text in ("❓ Помощь", "❓ Help"):
         await cmd_help(msg)
