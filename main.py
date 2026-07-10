@@ -803,27 +803,24 @@ async def remind_send(cb: CallbackQuery, state: FSMContext):
         d = datetime.fromisoformat(next_s["date"]).strftime("%d.%m.%Y")
         time_str = f" в {next_s['time']}" if next_s.get("time") else ""
 
-        text_ru = f"📚 Напоминание!
-
-Завтра у вас занятие по корейскому.
-📅 {d}{time_str}
-
-До встречи! 화이팅! 💪"
-        text_en = f"📚 Reminder!
-
-You have a Korean lesson tomorrow.
-📅 {d}{time_str}
-
-See you! 화이팅! 💪"
-        text = text_ru if lang == "ru" else text_en
+        msg_lesson_ru = (
+            "\U0001F4DA Напоминание!\n\n"
+            "Завтра у вас занятие по корейскому.\n"
+            f"\U0001F4C5 {d}{time_str}\n\n"
+            "До встречи! \U0001F4AA"
+        )
+        msg_lesson_en = (
+            "\U0001F4DA Reminder!\n\n"
+            "You have a Korean lesson tomorrow.\n"
+            f"\U0001F4C5 {d}{time_str}\n\n"
+            "See you! \U0001F4AA"
+        )
+        text = msg_lesson_ru if lang == "ru" else msg_lesson_en
 
         await bot.send_message(student["telegram_id"], text)
         await cb.message.edit_text(
-            f"✅ Напоминание об уроке отправлено!
-
-"
-            f"👤 {student['name']}
-📅 {d}{time_str}"
+            f"\u2705 Напоминание об уроке отправлено!\n\n"
+            f"\U0001F464 {student['name']}\n\U0001F4C5 {d}{time_str}"
         )
 
     elif rtype == "remind_payment":
@@ -833,27 +830,24 @@ See you! 화이팅! 💪"
             await state.clear(); await cb.answer(); return
 
         fmt = f"{debt:,}".replace(",", " ")
-        text_ru = f"💳 Напоминание об оплате
-
-У вас есть задолженность за обучение.
-Сумма: {fmt} ₩
-
-Пожалуйста, оплатите при возможности. Спасибо!"
-        text_en = f"💳 Payment reminder
-
-You have an outstanding balance.
-Amount: {fmt} ₩
-
-Please pay when you can. Thank you!"
-        text = text_ru if lang == "ru" else text_en
+        msg_lesson_ru = (
+            "\U0001F4DA Напоминание!\n\n"
+            "Завтра у вас занятие по корейскому.\n"
+            f"\U0001F4C5 {d}{time_str}\n\n"
+            "До встречи! \U0001F4AA"
+        )
+        msg_lesson_en = (
+            "\U0001F4DA Reminder!\n\n"
+            "You have a Korean lesson tomorrow.\n"
+            f"\U0001F4C5 {d}{time_str}\n\n"
+            "See you! \U0001F4AA"
+        )
+        text = msg_lesson_ru if lang == "ru" else msg_lesson_en
 
         await bot.send_message(student["telegram_id"], text)
         await cb.message.edit_text(
-            f"✅ Напоминание об оплате отправлено!
-
-"
-            f"👤 {student['name']}
-💳 {fmt} ₩"
+            f"\u2705 Напоминание об оплате отправлено!\n\n"
+            f"\U0001F464 {student['name']}\n\U0001F4B3 {fmt} \u20a9"
         )
 
     await state.clear()
