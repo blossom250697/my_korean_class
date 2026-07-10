@@ -593,8 +593,11 @@ async def cmd_schedule(msg: Message):
     upcoming = [s for s in sessions if s["date"] >= date.today().isoformat() and not s["held"]]
     if not upcoming:
         await msg.answer("📅 Ближайших занятий нет." if lang=="ru" else "📅 No upcoming lessons."); return
-    # Постоянное расписание по дням недели
-    sched = db.get_student_schedule(student["id"])
+    try:
+        sched = db.get_student_schedule(student["id"])
+    except Exception:
+        sched = []
+
     lines = ["📅 <b>Ваше расписание:</b>\n" if lang=="ru" else "📅 <b>Your schedule:</b>\n"]
     if sched:
         for row in sched:

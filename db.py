@@ -153,3 +153,37 @@ def get_students_with_debt():
         if debt > 0:
             result.append({**s, 'debt': debt})
     return result
+
+# ── Постоянное расписание ученика ─────────────────────────────────────────────
+
+def get_student_schedule(student_id: str) -> list:
+    """Расписание ученика по дням недели"""
+    try:
+        return sb._get('student_schedule', {
+            'student_id': f'eq.{student_id}',
+            'select': '*',
+            'order': 'dow'
+        })
+    except Exception:
+        return []
+
+def save_student_schedule(student_id: str, day_times: dict) -> None:
+    """Сохраняет расписание: day_times = {'0': '11:00', '2': '15:00'}"""
+    for dow_str, time in day_times.items():
+        try:
+            # Пробуем обновить существующую запись
+            existing = sb._get('student_schedule', {
+                'student_id': f'eq.{student_id}',
+                'dow': f'eq.{dow_str}'
+            })
+            if existing:
+                sb._patch('student_schedule', {'time': time}, {'id': existing[0]['id']})
+            else:
+                sb._post('student_schedule', {
+                    'id': str(uuid.uuid4()),
+                    'student_id': student_id,
+                    'dow': int(dow_str),
+                    'time': time,
+                }, prefer='return=minimal')
+        except Exception as e:
+            pass
