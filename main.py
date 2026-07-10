@@ -53,6 +53,10 @@ class ApplyForm(StatesGroup):
 
 # ── FSM: подтверждение расписания преподавателем ──────────────────────────────
 
+class RemindForm(StatesGroup):
+    type_select   = State()  # урок или оплата
+    student_select = State() # выбор ученика
+
 class ConfirmSchedule(StatesGroup):
     select_app  = State()  # выбор заявки
     frequency   = State()  # частота
@@ -669,11 +673,12 @@ async def cmd_help(msg: Message):
     if msg.from_user.id == TUTOR_ID:
         await msg.answer(
             "👩‍🏫 <b>Команды преподавателя:</b>\n\n"
-            "/schedule_set — утвердить расписание после договорённости с учеником\n"
+            "/schedule_set — утвердить расписание с учеником\n"
+            "/remind — отправить напоминание (урок или оплата)\n"
             "/students — список всех учеников\n"
             "/debtors — должники\n"
-            "/testremind — тест напоминаний о занятиях\n"
-            "/testpayment — тест напоминаний об оплате",
+            "/testremind — авто-напоминания об уроках\n"
+            "/testpayment — авто-напоминания об оплате",
             parse_mode="HTML"
         )
     else:
@@ -703,6 +708,156 @@ async def handle_menu_buttons(msg: Message, state: FSMContext):
 
     elif text in ("❓ Помощь", "❓ Help"):
         await cmd_help(msg)
+
+
+# ── /remind — ручная отправка напоминаний ────────────────────────────────────
+
+@dp.message(Command("remind"))
+async def cmd_remind(msg: Message, state: FSMContext):
+    if msg.from_user.id != TUTOR_ID: return
+
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="📚 Напомнить об уроке",   callback_data="remind_lesson")],
+        [InlineKeyboardButton(text="💳 Напомнить об оплате",  callback_data="remind_payment")],
+        [InlineKeyboardButton(text="📚💳 Всем об уроке",      callback_data="remind_lesson_all")],
+        [InlineKeyboardButton(text="💳📢 Всем должникам",     callback_data="remind_payment_all")],
+    ])
+    await msg.answer("📣 <b>Что напомнить?</b>", parse_mode="HTML", reply_markup=kb)
+    await state.set_state(RemindForm.type_select)
+
+@dp.callback_query(RemindForm.type_select, F.data.startswith("remind_"))
+async def remind_type(cb: CallbackQuery, state: FSMContext):
+    rtype = cb.data  # remind_lesson / remind_payment / remind_lesson_all / remind_payment_all
+
+    if rtype == "remind_lesson_all":
+        await cb.message.edit_text("⏳ Отправляю напоминания об уроках...")
+        await send_lesson_reminders()
+        await cb.message.edit_text("✅ Напоминания об уроках отправлены всем!")
+        await state.clear(); await cb.answer(); return
+
+    if rtype == "remind_payment_all":
+        await cb.message.edit_text("⏳ Отправляю напоминания об оплате...")
+        await send_payment_reminders()
+        await cb.message.edit_text("✅ Напоминания об оплате отправлены всем должникам!")
+        await state.clear(); await cb.answer(); return
+
+    # Выбор конкретного ученика
+    students = db.get_all_students()
+    with_tg  = [s for s in students if s.get("telegram_id")]
+
+    if not with_tg:
+        await cb.message.edit_text("😔 Нет учеников с привязанным Telegram аккаунтом.")
+        await state.clear(); await cb.answer(); return
+
+    await state.update_data(rtype=rtype)
+
+    buttons = []
+    for s in with_tg:
+        label = f"👤 {s['name']}"
+        if rtype == "remind_payment":
+            debt = db.get_student_debt(s["id"])
+            if debt == 0:
+                label += " ✅ (нет долга)"
+            else:
+                fmt = f"{debt:,}".replace(",", " ")
+                label += f" — {fmt} ₩"
+        buttons.append([InlineKeyboardButton(text=label, callback_data=f"rpick_{s['id']}")])
+
+    buttons.append([InlineKeyboardButton(text="❌ Отмена", callback_data="remind_cancel")])
+
+    title = "📚 Кому напомнить об уроке?" if rtype == "remind_lesson" else "💳 Кому напомнить об оплате?"
+    await cb.message.edit_text(f"<b>{title}</b>", parse_mode="HTML",
+                               reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons))
+    await state.set_state(RemindForm.student_select)
+    await cb.answer()
+
+@dp.callback_query(RemindForm.student_select, F.data == "remind_cancel")
+async def remind_cancel(cb: CallbackQuery, state: FSMContext):
+    await state.clear()
+    await cb.message.edit_text("Отменено.")
+    await cb.answer()
+
+@dp.callback_query(RemindForm.student_select, F.data.startswith("rpick_"))
+async def remind_send(cb: CallbackQuery, state: FSMContext):
+    student_id = cb.data.replace("rpick_", "")
+    data  = await state.get_data()
+    rtype = data.get("rtype")
+
+    student = next((s for s in db.get_all_students() if s["id"] == student_id), None)
+    if not student or not student.get("telegram_id"):
+        await cb.answer("Ученик не найден или нет Telegram", show_alert=True)
+        await state.clear(); return
+
+    lang = student.get("telegram_lang", "ru")
+
+    if rtype == "remind_lesson":
+        # Ближайшее занятие
+        sessions = db.get_sessions_for_student(student_id)
+        upcoming = [s for s in sessions if s["date"] >= date.today().isoformat() and not s["held"]]
+
+        if not upcoming:
+            await cb.message.edit_text(f"😔 У {student['name']} нет предстоящих занятий.")
+            await state.clear(); await cb.answer(); return
+
+        next_s = upcoming[0]
+        d = datetime.fromisoformat(next_s["date"]).strftime("%d.%m.%Y")
+        time_str = f" в {next_s['time']}" if next_s.get("time") else ""
+
+        text_ru = f"📚 Напоминание!
+
+Завтра у вас занятие по корейскому.
+📅 {d}{time_str}
+
+До встречи! 화이팅! 💪"
+        text_en = f"📚 Reminder!
+
+You have a Korean lesson tomorrow.
+📅 {d}{time_str}
+
+See you! 화이팅! 💪"
+        text = text_ru if lang == "ru" else text_en
+
+        await bot.send_message(student["telegram_id"], text)
+        await cb.message.edit_text(
+            f"✅ Напоминание об уроке отправлено!
+
+"
+            f"👤 {student['name']}
+📅 {d}{time_str}"
+        )
+
+    elif rtype == "remind_payment":
+        debt = db.get_student_debt(student_id)
+        if debt == 0:
+            await cb.message.edit_text(f"✅ У {student['name']} нет долгов — напоминание не нужно.")
+            await state.clear(); await cb.answer(); return
+
+        fmt = f"{debt:,}".replace(",", " ")
+        text_ru = f"💳 Напоминание об оплате
+
+У вас есть задолженность за обучение.
+Сумма: {fmt} ₩
+
+Пожалуйста, оплатите при возможности. Спасибо!"
+        text_en = f"💳 Payment reminder
+
+You have an outstanding balance.
+Amount: {fmt} ₩
+
+Please pay when you can. Thank you!"
+        text = text_ru if lang == "ru" else text_en
+
+        await bot.send_message(student["telegram_id"], text)
+        await cb.message.edit_text(
+            f"✅ Напоминание об оплате отправлено!
+
+"
+            f"👤 {student['name']}
+💳 {fmt} ₩"
+        )
+
+    await state.clear()
+    await cb.answer()
 
 # ── Напоминания ───────────────────────────────────────────────────────────────
 
