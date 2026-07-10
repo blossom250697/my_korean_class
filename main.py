@@ -21,6 +21,14 @@ import db
 
 # ── Главное меню (кнопки под полем ввода) ────────────────────────────────────
 
+def tutor_menu_kb() -> ReplyKeyboardMarkup:
+    buttons = [
+        [KeyboardButton(text="📋 Заявки"),        KeyboardButton(text="👥 Ученики")],
+        [KeyboardButton(text="📅 Расписание"),    KeyboardButton(text="💸 Должники")],
+        [KeyboardButton(text="📣 Напоминание"),   KeyboardButton(text="❓ Помощь")],
+    ]
+    return ReplyKeyboardMarkup(keyboard=buttons, resize_keyboard=True, persistent=True)
+
 def main_menu_kb(lang: str) -> ReplyKeyboardMarkup:
     if lang == "ru":
         buttons = [
@@ -139,6 +147,15 @@ async def cmd_start(msg: Message, state: FSMContext):
     # Если пришёл по ссылке ?start=apply — сразу запускаем анкету
     if msg.text and "apply" in msg.text and not student:
         await cmd_apply(msg, state)
+        return
+
+    # Преподаватель получает своё меню
+    if msg.from_user.id == TUTOR_ID:
+        await msg.answer(
+            "👩‍🏫 <b>Панель преподавателя</b>",
+            reply_markup=tutor_menu_kb(),
+            parse_mode="HTML"
+        )
         return
 
     if student:
@@ -688,6 +705,43 @@ async def cmd_help(msg: Message):
         lang = get_lang(msg.from_user)
         await msg.answer(t(lang, "start"))
 
+
+
+# ── Кнопки преподавателя ─────────────────────────────────────────────────────
+
+@dp.message(F.text.in_({
+    "📋 Заявки", "👥 Ученики", "📅 Расписание",
+    "💸 Должники", "📣 Напоминание", "❓ Помощь",
+}))
+async def handle_tutor_buttons(msg: Message, state: FSMContext):
+    if msg.from_user.id != TUTOR_ID: return
+    text = msg.text
+
+    if text == "📋 Заявки":
+        await cmd_schedule_set(msg, state)
+
+    elif text == "👥 Ученики":
+        await cmd_students(msg)
+
+    elif text == "📅 Расписание":
+        await cmd_schedule_set(msg, state)
+
+    elif text == "💸 Должники":
+        await cmd_debtors(msg)
+
+    elif text == "📣 Напоминание":
+        await cmd_remind(msg, state)
+
+    elif text == "❓ Помощь":
+        await msg.answer(
+            "👩‍🏫 <b>Команды преподавателя:</b>\n\n"
+            "/schedule_set — утвердить расписание\n"
+            "/remind — отправить напоминание\n"
+            "/students — все ученики\n"
+            "/debtors — должники",
+            parse_mode="HTML",
+            reply_markup=tutor_menu_kb()
+        )
 
 # ── Обработчик кнопок главного меню ──────────────────────────────────────────
 
