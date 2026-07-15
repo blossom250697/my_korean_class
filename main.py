@@ -1252,24 +1252,44 @@ async def cmd_applications(msg: Message, state: FSMContext):
     text = f"📋 <b>Новые заявки ({len(apps)}):</b>\n\n"
     buttons = []
     for app in apps:
-        freq = {"2x":"2×/нед","3x":"3×/нед"}.get(app.get("frequency",""),"")
         pref = app.get("preferred_time","—")
+        # Определяем тип заявки: lesson_request (есть level как число) или новый ученик
+        is_lesson_request = app.get("level","").isdigit()
+
         text += f"👤 <b>{app['name']}</b>\n"
-        text += f"📊 {app.get('level','—')} · {freq}\n"
-        text += f"⏰ {pref}\n"
-        if app.get("message"):
-            text += f"💬 {app['message']}\n"
+        if is_lesson_request:
+            text += f"📅 Запрос занятия: {pref}\n"
+        else:
+            freq = {"2x":"2×/нед","3x":"3×/нед"}.get(app.get("frequency",""),"")
+            text += f"📊 {app.get('level','—')} · {freq}\n"
+            text += f"⏰ {pref}\n"
         text += "\n"
-        buttons.append([
-            InlineKeyboardButton(
-                text=f"✅ Утвердить расписание — {app['name']}",
-                callback_data=f"pickapp_{app['id']}"
-            ),
-            InlineKeyboardButton(
-                text="❌",
-                callback_data=f"reject_{app['id']}_{app['telegram_id']}_{app.get('lang','ru')}"
-            ),
-        ])
+
+        if is_lesson_request:
+            # Запрос занятия — просто утверждаем через apl_
+            req_id = app["id"].replace("-","")
+            buttons.append([
+                InlineKeyboardButton(
+                    text=f"✅ Утвердить занятие — {app['name']}",
+                    callback_data=f"apl_{req_id}"
+                ),
+                InlineKeyboardButton(
+                    text="❌",
+                    callback_data=f"rjl_{req_id}"
+                ),
+            ])
+        else:
+            # Новый ученик — утверждаем расписание через pickapp_
+            buttons.append([
+                InlineKeyboardButton(
+                    text=f"✅ Утвердить расписание — {app['name']}",
+                    callback_data=f"pickapp_{app['id']}"
+                ),
+                InlineKeyboardButton(
+                    text="❌",
+                    callback_data=f"reject_{app['id']}_{app['telegram_id']}_{app.get('lang','ru')}"
+                ),
+            ])
 
     await msg.answer(text, parse_mode="HTML",
                      reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons))
