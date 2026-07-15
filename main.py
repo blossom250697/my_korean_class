@@ -65,6 +65,11 @@ class ApplyForm(StatesGroup):
 
 # ── FSM: подтверждение расписания преподавателем ──────────────────────────────
 
+class RequestLesson(StatesGroup):
+    day_select  = State()  # выбор дня недели
+    time_input  = State()  # ввод времени
+    confirm     = State()  # подтверждение
+
 class RemindForm(StatesGroup):
     type_select   = State()  # урок или оплата
     student_select = State() # выбор ученика
@@ -608,6 +613,232 @@ async def cmd_link(msg: Message):
         parse_mode="HTML"
     )
 
+
+
+# ── Запрос разового занятия существующим учеником ────────────────────────────
+
+async def request_lesson_start(msg: Message, state: FSMContext, student: dict, lang: str):
+    """Начало флоу запроса разового занятия"""
+    text_ru = (
+        "📅 Укажите удобное время для занятия.\n\n"
+        "Сначала выберите день недели:"
+    )
+    text_en = (
+        "📅 Please indicate a convenient time for the lesson.\n\n"
+        "First, select the day of the week:"
+    )
+
+    days_ru = ["Понедельник", "Вторник", "Среда", "Четверг", "Пятница", "Суббота", "Воскресенье"]
+    days_en = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
+    days = days_ru if lang == "ru" else days_en
+
+    buttons = []
+    row = []
+    for i, day in enumerate(days):
+        row.append(InlineKeyboardButton(text=day, callback_data=f"rlesson_day_{i}"))
+        if len(row) == 2:
+            buttons.append(row); row = []
+    if row: buttons.append(row)
+
+    await state.update_data(student_id=student["id"], student_name=student["name"], lang=lang)
+    await msg.answer(
+        text_ru if lang == "ru" else text_en,
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons)
+    )
+    await state.set_state(RequestLesson.day_select)
+
+@dp.callback_query(RequestLesson.day_select, F.data.startswith("rlesson_day_"))
+async def request_lesson_day(cb: CallbackQuery, state: FSMContext):
+    dow = int(cb.data.replace("rlesson_day_", ""))
+    data = await state.get_data()
+    lang = data["lang"]
+    days_ru = ["Понедельник", "Вторник", "Среда", "Четверг", "Пятница", "Суббота", "Воскресенье"]
+    days_en = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
+    day_name = days_ru[dow] if lang == "ru" else days_en[dow]
+
+    await state.update_data(dow=dow, day_name=day_name)
+    text_ru = f"✅ {day_name}\n\nТеперь укажите удобное время.\nНапример: <code>15:00</code>"
+    text_en = f"✅ {day_name}\n\nNow enter a convenient time.\nFor example: <code>15:00</code>"
+    await cb.message.edit_text(
+        text_ru if lang == "ru" else text_en,
+        parse_mode="HTML"
+    )
+    await state.set_state(RequestLesson.time_input)
+    await cb.answer()
+
+@dp.message(RequestLesson.time_input)
+async def request_lesson_time(msg: Message, state: FSMContext):
+    data = await state.get_data()
+    lang = data["lang"]
+    time_text = msg.text.strip()
+
+    await state.update_data(time_text=time_text)
+
+    day_name = data["day_name"]
+    text_ru = (
+        f"📋 Проверьте запрос:\n\n"
+        f"📅 День: {day_name}\n"
+        f"⏰ Время: {time_text}\n\n"
+        f"Отправить запрос преподавателю?"
+    )
+    text_en = (
+        f"📋 Check your request:\n\n"
+        f"📅 Day: {day_name}\n"
+        f"⏰ Time: {time_text}\n\n"
+        f"Send request to the teacher?"
+    )
+    kb = InlineKeyboardMarkup(inline_keyboard=[[
+        InlineKeyboardButton(
+            text="✅ Отправить" if lang=="ru" else "✅ Send",
+            callback_data="rlesson_confirm"
+        ),
+        InlineKeyboardButton(
+            text="✏️ Изменить" if lang=="ru" else "✏️ Edit",
+            callback_data="rlesson_edit"
+        ),
+    ]])
+    await msg.answer(text_ru if lang=="ru" else text_en, reply_markup=kb, parse_mode="HTML")
+    await state.set_state(RequestLesson.confirm)
+
+@dp.callback_query(RequestLesson.confirm, F.data == "rlesson_edit")
+async def request_lesson_edit(cb: CallbackQuery, state: FSMContext):
+    data = await state.get_data()
+    lang = data["lang"]
+    await cb.message.edit_text(
+        "⏰ Введите время заново. Например: <code>15:00</code>" if lang=="ru"
+        else "⏰ Enter time again. For example: <code>15:00</code>",
+        parse_mode="HTML"
+    )
+    await state.set_state(RequestLesson.time_input)
+    await cb.answer()
+
+@dp.callback_query(RequestLesson.confirm, F.data == "rlesson_confirm")
+async def request_lesson_send(cb: CallbackQuery, state: FSMContext):
+    data = await state.get_data()
+    lang = data["lang"]
+    student_id = data["student_id"]
+    student_name = data["student_name"]
+    day_name = data["day_name"]
+    time_text = data["time_text"]
+    dow = data["dow"]
+
+    # Подтверждение ученику
+    text_ru = (
+        "✅ Запрос отправлен!\n\n"
+        "Преподаватель рассмотрит и утвердит занятие.\n"
+        "Вы получите уведомление."
+    )
+    text_en = (
+        "✅ Request sent!\n\n"
+        "The teacher will review and confirm the lesson.\n"
+        "You will receive a notification."
+    )
+    await cb.message.edit_text(text_ru if lang=="ru" else text_en)
+
+    # Уведомление преподавателю с кнопкой утверждения
+    notif = (
+        f"📬 <b>Запрос на занятие от ученика!</b>\n\n"
+        f"👤 {student_name}\n"
+        f"📅 День: {day_name}\n"
+        f"⏰ Время: {time_text}\n"
+        f"🆔 student_id: <code>{student_id}</code>"
+    )
+    kb = InlineKeyboardMarkup(inline_keyboard=[[
+        InlineKeyboardButton(
+            text="✅ Утвердить занятие",
+            callback_data=f"approve_lesson_{student_id}_{dow}_{time_text}_{cb.from_user.id}_{lang}"
+        ),
+        InlineKeyboardButton(
+            text="❌ Отклонить",
+            callback_data=f"reject_lesson_{cb.from_user.id}_{lang}"
+        ),
+    ]])
+    await bot.send_message(TUTOR_ID, notif, parse_mode="HTML", reply_markup=kb)
+    await state.clear()
+    await cb.answer()
+
+@dp.callback_query(F.data.startswith("approve_lesson_"))
+async def approve_lesson_request(cb: CallbackQuery):
+    if cb.from_user.id != TUTOR_ID: return
+    # approve_lesson_{student_id}_{dow}_{time}_{student_tg_id}_{lang}
+    parts = cb.data.split("_")
+    # approve lesson {student_id} {dow} {time} {tg_id} {lang}
+    student_id  = parts[2]
+    dow         = int(parts[3])
+    time_text   = parts[4]
+    student_tg_id = int(parts[5])
+    lang        = parts[6] if len(parts) > 6 else "ru"
+
+    # Находим ближайшую дату с этим днём недели
+    from datetime import date, timedelta
+    today = date.today()
+    days_ahead = (dow - today.weekday()) % 7
+    if days_ahead == 0: days_ahead = 7  # если сегодня — берём следующую неделю
+    lesson_date = (today + timedelta(days=days_ahead)).isoformat()
+
+    # Добавляем занятие в Supabase
+    import uuid as _uuid
+    session = {
+        "id":         str(_uuid.uuid4()),
+        "student_id": student_id,
+        "date":       lesson_date,
+        "time":       time_text,
+        "held":       False,
+        "paid":       False,
+    }
+    db.add_session_direct(session)
+
+    # Обновляем сообщение преподавателю
+    days_ru = ["Понедельник","Вторник","Среда","Четверг","Пятница","Суббота","Воскресенье"]
+    await cb.message.edit_text(
+        f"✅ <b>Занятие утверждено!</b>\n\n"
+        f"📅 {days_ru[dow]}, {lesson_date}\n"
+        f"⏰ {time_text}\n\n"
+        f"Занятие добавлено в систему.",
+        parse_mode="HTML"
+    )
+
+    # Уведомление ученику
+    from datetime import datetime
+    date_fmt = datetime.fromisoformat(lesson_date).strftime("%d.%m.%Y")
+    days_names = ["Понедельник","Вторник","Среда","Четверг","Пятница","Суббота","Воскресенье"]
+    days_en = ["Monday","Tuesday","Wednesday","Thursday","Friday","Saturday","Sunday"]
+    day_name = days_names[dow] if lang=="ru" else days_en[dow]
+
+    text_ru = (
+        f"🎉 Занятие утверждено!\n\n"
+        f"📅 {day_name}, {date_fmt}\n"
+        f"⏰ {time_text}\n\n"
+        f"До встречи! 💪"
+    )
+    text_en = (
+        f"🎉 Lesson confirmed!\n\n"
+        f"📅 {day_name}, {date_fmt}\n"
+        f"⏰ {time_text}\n\n"
+        f"See you! 💪"
+    )
+    try:
+        await bot.send_message(student_tg_id, text_ru if lang=="ru" else text_en)
+    except Exception as e:
+        log.warning(f"Не удалось уведомить ученика: {e}")
+    await cb.answer()
+
+@dp.callback_query(F.data.startswith("reject_lesson_"))
+async def reject_lesson_request(cb: CallbackQuery):
+    if cb.from_user.id != TUTOR_ID: return
+    parts = cb.data.split("_")
+    student_tg_id = int(parts[2])
+    lang = parts[3] if len(parts) > 3 else "ru"
+
+    await cb.message.edit_text("❌ Запрос на занятие отклонён.")
+
+    text_ru = "😔 К сожалению, преподаватель не может провести занятие в указанное время.\n\nПопробуйте выбрать другое время."
+    text_en = "😔 Unfortunately, the teacher is not available at the requested time.\n\nPlease try a different time."
+    try:
+        await bot.send_message(student_tg_id, text_ru if lang=="ru" else text_en)
+    except Exception as e:
+        log.warning(f"Не удалось уведомить ученика: {e}")
+    await cb.answer()
 
 # ── /schedule — расписание ученика ────────────────────────────────────────────
 
