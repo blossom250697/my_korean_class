@@ -742,14 +742,15 @@ async def request_lesson_send(cb: CallbackQuery, state: FSMContext):
     full_uuid = str(_uuid2.uuid4())
     req_id = full_uuid.replace("-", "")  # UUID без дефисов = 32 символа, влезает в callback
     db.create_application({
-        "id":           full_uuid,  # полный UUID для Supabase
+        "id":           full_uuid,
         "telegram_id":  cb.from_user.id,
         "name":         student_name,
-        "level":        "",
-        "frequency":    "",
+        "level":        str(dow),           # день недели
+        "frequency":    time_text,          # время занятия
         "preferred_time": f"{day_name} {time_text}",
-        "message":      f"dow:{dow}|time:{time_text}|sid:{student_id}|lang:{lang}",
+        "message":      student_id,         # student_id целиком
         "lang":         lang,
+        "username":     str(cb.from_user.id),
         "status":       "new",
     })
 
@@ -776,14 +777,10 @@ async def approve_lesson_request(cb: CallbackQuery):
     if not app:
         await cb.answer("Заявка не найдена", show_alert=True); return
     # Парсим: dow:{dow}|time:{time}|sid:{student_id}|lang:{lang}
-    try:
-        msg_data = dict(kv.split(":") for kv in app["message"].split("|"))
-        dow           = int(msg_data["dow"])
-        time_text     = msg_data["time"]
-        student_id    = msg_data["sid"]
-        lang          = msg_data.get("lang", "ru")
-    except Exception as e:
-        await cb.answer(f"Ошибка данных: {e}", show_alert=True); return
+    dow           = int(app["level"])      # день недели
+    time_text     = app["frequency"]       # время
+    student_id    = app["message"]         # student_id
+    lang          = app.get("lang", "ru")
     student_tg_id = app["telegram_id"]
 
     # Находим ближайшую дату с этим днём недели
