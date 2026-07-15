@@ -839,6 +839,7 @@ function typeColorS(type){
 
 function SchedulePage(){
   const today=new Date();
+  const {students, sessions} = useData(); // занятия учеников из Supabase
   const [lang,setLang]=useState(()=>ls(KS.lang,'ru'));
   const [year,setYear]=useState(today.getFullYear());
   const [month,setMonth]=useState(today.getMonth()+1);
@@ -885,6 +886,20 @@ function SchedulePage(){
   const getSlotLabel=(ds,slot)=>{const ct=custTime[`${ds}_${slot.id}`];if(!ct)return slot.label;const f=(h,m)=>`${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}`;return `${f(ct.fH,ct.fM)} – ${f(ct.tH,ct.tM)}`;};
   const saveCustomTime=(ds,slotId,fH,fM,tH,tM)=>{const nd={...custTime,[`${ds}_${slotId}`]:{fH:+fH,fM:+fM,tH:+tH,tM:+tM}};setCustTime(nd);lss(KS.custTime(year,month),nd);setEditingSlot(null);};
   const resetCustomTime=(ds,slotId)=>{const nd={...custTime};delete nd[`${ds}_${slotId}`];setCustTime(nd);lss(KS.custTime(year,month),nd);setEditingSlot(null);};
+
+  // Возвращает ученика если его занятие пересекается со слотом в эту дату
+  const getStudentForSlot = (ds, slot) => {
+    const daySessions = sessions.filter(s => s.date === ds && s.time);
+    for (const s of daySessions) {
+      const student = students.find(st => st.id === s.student_id);
+      if (!student) continue;
+      // Проверяем совпадение времени
+      const sessionTime = s.time; // '11:00'
+      const slotStart = slot.label.split('–')[0].trim(); // '11:00'
+      if (sessionTime === slotStart) return { student, session: s };
+    }
+    return null;
+  };
   const saveWorkAvail=(ds,text)=>{const nd={...workAvail};if(!text.trim())delete nd[ds];else nd[ds]=text.trim();setWorkAvail(nd);lss(KS.workAvail(year,month),nd);};
   const getNextWeekDates=(ds)=>{const d=new Date(ds);const targets=[];for(let i=7;;i+=7){const next=new Date(d);next.setDate(d.getDate()+i);if(next.getMonth()+1!==month||next.getFullYear()!==year)break;targets.push(next.toISOString().slice(0,10));}return targets;};
   const repeatNextWeek=(ds)=>{const targets=getNextWeekDates(ds);if(!Object.keys(slotData).some(k=>k.startsWith(ds)))return 0;const nd={...slotData};const ct2={...custTime};targets.forEach(td=>{slots.forEach(s=>{const fk=`${ds}_${s.id}`,tk=`${td}_${s.id}`;if(slotData[fk])nd[tk]=slotData[fk];if(custTime[fk])ct2[tk]=custTime[fk];});});setSlotData(nd);lss(KS.slotData(year,month),nd);setCustTime(ct2);lss(KS.custTime(year,month),ct2);return targets.length;};
@@ -1057,10 +1072,11 @@ function SchedulePage(){
                       <div onClick={()=>!isEditing&&toggleSlot(popup.ds,slot.id)}
                         style={{display:'flex',alignItems:'center',gap:10,padding:'12px 14px',borderRadius:9,border:`1.5px solid ${st==='free'?'#86EFAC':st==='busy'?'#FCA5A5':'var(--border)'}`,cursor:'pointer',background:st==='free'?'var(--green-lt)':st==='busy'?'var(--red-lt)':'var(--bg)',transition:'background .12s'}}>
                         <span style={{fontSize:13.5,fontWeight:800,flex:1}}>⏰ {lbl}{isCustom&&<span style={{fontSize:10,color:'var(--purple)',background:'var(--purple-lt)',padding:'1px 5px',borderRadius:4,fontWeight:700,marginLeft:5}}>✦</span>}</span>
-                        <span style={{fontSize:12.5,display:'flex',alignItems:'center',gap:4,minWidth:80}}>
+                        <span style={{fontSize:12.5,display:'flex',alignItems:'center',gap:4,minWidth:80,flexWrap:'wrap'}}>
                           {st==='free'&&<><span style={{color:'var(--green)'}}>✓</span><span style={{color:'var(--green)',fontWeight:700}}>{t.slotFree}</span></>}
                           {st==='busy'&&<><span style={{color:'var(--red)'}}>✕</span><span style={{color:'var(--red)',fontWeight:700}}>{t.slotBusy}</span></>}
-                          {!st&&<span style={{color:'var(--ink3)'}}>{t.slotEmpty}</span>}
+                          {!st&&!studentSlot&&<span style={{color:'var(--ink3)'}}>{t.slotEmpty}</span>}
+                          {studentSlot&&<span style={{color:'var(--blue)',fontWeight:700,fontSize:11}}>🎓 {studentSlot.student.name}</span>}
                         </span>
                         <button onClick={e=>{e.stopPropagation();setEditingSlot(isEditing?null:{slotId:slot.id,from:defFrom,to:defTo});}} style={{width:28,height:28,borderRadius:6,border:'none',background:'transparent',cursor:'pointer',fontSize:14,opacity:isEditing?1:.5}}>✏️</button>
                       </div>
