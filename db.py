@@ -85,16 +85,21 @@ def create_application(data: dict):
 
 def get_application(app_id: str):
     """Ищет заявку по UUID (с дефисами или без)"""
+    import logging
+    log = logging.getLogger(__name__)
     # Восстанавливаем дефисы если их нет (32 hex символа -> UUID формат)
     clean = app_id.replace("-", "")
     if len(clean) == 32:
         uuid_str = f"{clean[0:8]}-{clean[8:12]}-{clean[12:16]}-{clean[16:20]}-{clean[20:32]}"
     else:
         uuid_str = app_id
+    log.info(f"get_application: searching for id={uuid_str}")
     try:
         r = sb._get('applications', {'id': f'eq.{uuid_str}', 'select': '*'})
+        log.info(f"get_application: result={r}")
         return r[0] if r else None
-    except Exception:
+    except Exception as e:
+        log.error(f"get_application error: {e}")
         return None
 
 def get_new_applications():
