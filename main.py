@@ -773,8 +773,13 @@ async def request_lesson_send(cb: CallbackQuery, state: FSMContext):
 async def approve_lesson_request(cb: CallbackQuery):
     if cb.from_user.id != TUTOR_ID: return
     req_id = cb.data.replace("apl_", "")
+    log.info(f"approve_lesson: req_id={req_id}, len={len(req_id)}")
     app = db.get_application(req_id)
+    log.info(f"approve_lesson: app={app}")
     if not app:
+        # Попробуем найти все новые заявки и показать их ID
+        all_apps = db.get_new_applications()
+        log.info(f"approve_lesson: all new apps={[a['id'] for a in all_apps]}")
         await cb.answer("Заявка не найдена", show_alert=True); return
     # Парсим: dow:{dow}|time:{time}|sid:{student_id}|lang:{lang}
     dow           = int(app["level"])      # день недели
