@@ -190,8 +190,10 @@ async def cmd_start(msg: Message, state: FSMContext):
 @dp.message(Command("apply"))
 async def cmd_apply(msg: Message, state: FSMContext):
     if db.get_student_by_telegram(msg.from_user.id):
-        lang = get_lang(msg.from_user)
-        await msg.answer("Вы уже наш ученик! 🎓" if lang=="ru" else "You are already our student! 🎓")
+        # Существующий ученик — запрашивает разовое занятие
+        student = db.get_student_by_telegram(msg.from_user.id)
+        lang = student.get("telegram_lang", get_lang(msg.from_user))
+        await request_lesson_start(msg, state, student, lang)
         return
     lang = get_lang(msg.from_user)
     await state.update_data(lang=lang)
