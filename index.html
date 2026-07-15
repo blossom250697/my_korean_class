@@ -881,24 +881,79 @@ function SchedulePage(){
   const setDayType=(ds,type)=>{const nd={...dayTypes};if(type===(dowTypes[popup?.dow]??'normal'))delete nd[ds];else nd[ds]=type;setDayTypes(nd);lss(KS.dayTypes(year,month),nd);};
   const setDowType=(dow,type)=>{const nd={...dowTypes,[dow]:type};setDowTypes(nd);lss(KS.dowTypes(year,month),nd);};
   const updateSlots=(nd)=>{setSlotData(nd);lss(KS.slotData(year,month),nd);};
-  const toggleSlot=(ds,slotId)=>{const k=`${ds}_${slotId}`,cur=slotData[k];const next=cur===undefined?'free':cur==='free'?'busy':undefined;const nd={...slotData};if(next===undefined)delete nd[k];else nd[k]=next;updateSlots(nd);};
+  const toggleSlot=(ds,slotId)=>{
+    // Находим слот по id
+    const slot = slots.find(s=>s.id===slotId);
+    // Если в этом слоте есть занятие ученика — не разрешаем сделать его свободным
+    if (slot) {
+      const studentsInSlot = getStudentsForSlot(ds, slot);
+      if (studentsInSlot.length > 0) {
+        const cur = slotData[`${ds}_${slotId}`];
+        // Разрешаем только переключение в busy, но не в free/undefined
+        if (cur === 'busy') return; // уже занято — не меняем
+        // Автоматически ставим busy если есть ученик
+        const nd={...slotData,[`${ds}_${slotId}`]:'busy'};
+        updateSlots(nd); return;
+      }
+    }
+    const k=`${ds}_${slotId}`,cur=slotData[k];
+    const next=cur===undefined?'free':cur==='free'?'busy':undefined;
+    const nd={...slotData};if(next===undefined)delete nd[k];else nd[k]=next;updateSlots(nd);
+  };
   const markDay=(ds,state)=>{const nd={...slotData};slots.forEach(s=>{const k=`${ds}_${s.id}`;if(state===null)delete nd[k];else nd[k]=state;});updateSlots(nd);};
   const getSlotLabel=(ds,slot)=>{const ct=custTime[`${ds}_${slot.id}`];if(!ct)return slot.label;const f=(h,m)=>`${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}`;return `${f(ct.fH,ct.fM)} – ${f(ct.tH,ct.tM)}`;};
   const saveCustomTime=(ds,slotId,fH,fM,tH,tM)=>{const nd={...custTime,[`${ds}_${slotId}`]:{fH:+fH,fM:+fM,tH:+tH,tM:+tM}};setCustTime(nd);lss(KS.custTime(year,month),nd);setEditingSlot(null);};
   const resetCustomTime=(ds,slotId)=>{const nd={...custTime};delete nd[`${ds}_${slotId}`];setCustTime(nd);lss(KS.custTime(year,month),nd);setEditingSlot(null);};
 
-  // Возвращает ученика если его занятие пересекается со слотом в эту дату
-  const getStudentForSlot = (ds, slot) => {
-    const daySessions = sessions.filter(s => s.date === ds && s.time);
+  // ── Вспомогательные функции для дат и времени ──────────────────────────────
+
+  // Переводит 'HH:MM' в минуты
+  const timeToMin = (t) => {
+    if (!t) return -1;
+    const [h, m] = t.split(':').map(Number);
+    return h * 60 + (m || 0);
+  };
+
+  // Возвращает сегодняшнюю дату в формате YYYY-MM-DD (Asia/Seoul)
+  const getTodaySeoul = () => {
+    return new Date().toLocaleDateString('en-CA', {timeZone: 'Asia/Seoul'});
+  };
+
+  // Нормализует дату занятия к строке YYYY-MM-DD (убирает время если есть)
+  const normDate = (d) => (d || '').slice(0, 10);
+
+  // Проверяет попадает ли время занятия в слот (включая пользовательское время)
+  const isLessonInsideSlot = (lessonTime, slot, ds) => {
+    if (!lessonTime) return false;
+    const lMin = timeToMin(lessonTime);
+    // Берём лейбл слота (с учётом кастомного времени если есть)
+    const lbl = getSlotLabel(ds, slot);
+    const parts = lbl.split('–');
+    if (parts.length < 2) return false;
+    const slotStart = timeToMin(parts[0].trim());
+    const slotEnd   = timeToMin(parts[1].trim());
+    return lMin >= slotStart && lMin < slotEnd;
+  };
+
+  // Возвращает ВСЕ занятия учеников в слоте (может быть несколько)
+  const getStudentsForSlot = (ds, slot) => {
+    const result = [];
+    const dsNorm = normDate(ds);
+    const daySessions = sessions.filter(s => normDate(s.date) === dsNorm && s.time);
     for (const s of daySessions) {
       const student = students.find(st => st.id === s.student_id);
       if (!student) continue;
-      // Проверяем совпадение времени
-      const sessionTime = s.time; // '11:00'
-      const slotStart = slot.label.split('–')[0].trim(); // '11:00'
-      if (sessionTime === slotStart) return { student, session: s };
+      if (isLessonInsideSlot(s.time, slot, ds)) {
+        result.push({ student, session: s });
+      }
     }
-    return null;
+    return result;
+  };
+
+  // Оставляем для совместимости (возвращает первого)
+  const getStudentForSlot = (ds, slot) => {
+    const all = getStudentsForSlot(ds, slot);
+    return all.length > 0 ? all[0] : null;
   };
   const saveWorkAvail=(ds,text)=>{const nd={...workAvail};if(!text.trim())delete nd[ds];else nd[ds]=text.trim();setWorkAvail(nd);lss(KS.workAvail(year,month),nd);};
   const getNextWeekDates=(ds)=>{const d=new Date(ds);const targets=[];for(let i=7;;i+=7){const next=new Date(d);next.setDate(d.getDate()+i);if(next.getMonth()+1!==month||next.getFullYear()!==year)break;targets.push(next.toISOString().slice(0,10));}return targets;};
@@ -996,7 +1051,10 @@ function SchedulePage(){
                     const toMin=s=>{const[h,m]=s.split(':').map(Number);return h*60+(m||0);};
                     const toStr=m=>`${String(Math.floor(m/60)).padStart(2,'0')}:${String(m%60).padStart(2,'0')}`;
                     const wS=toMin(settings.workDayStart||'10:00'),wE=toMin(settings.workDayEnd||'19:00');
-                    const lessons=slots.filter(s=>slotData[`${ds}_${s.id}`]).map(s=>{const lbl=getSlotLabel(ds,s);const[fp,tp]=lbl.split('–');return{f:toMin(fp.trim()),t:toMin(tp.trim())};}).filter(r=>r.f<wE&&r.t>wS).sort((a,b)=>a.f-b.f);
+                    // Занятые периоды = ручные слоты + занятия учеников
+                    const manualLessons = slots.filter(s=>slotData[`${ds}_${s.id}`]).map(s=>{const lbl=getSlotLabel(ds,s);const[fp,tp]=lbl.split('–');return{f:toMin(fp.trim()),t:toMin(tp.trim())};}).filter(r=>r.f<wE&&r.t>wS);
+                    const studentLessons = sessions.filter(s=>normDate(s.date)===ds&&s.time).map(s=>{const lMin=toMin(s.time);return{f:lMin,t:lMin+180};}).filter(r=>r.f<wE&&r.t>wS);
+                    const lessons=[...manualLessons,...studentLessons].sort((a,b)=>a.f-b.f);
                     const free=[];let cur=wS;
                     lessons.forEach(r=>{const start=Math.max(r.f,wS);if(start>cur)free.push({f:cur,t:start});cur=Math.max(cur,Math.min(r.t,wE));});
                     if(cur<wE)free.push({f:cur,t:wE});
@@ -1004,8 +1062,29 @@ function SchedulePage(){
                     const freeText=free.map(w=>`${ko(toStr(w.f))}~${ko(toStr(w.t))}`).join(', ');
                     previewContent=<div style={{fontSize:10,fontWeight:700,padding:'2px 5px',borderRadius:4,background:'#EEF2FF',color:'var(--blue)',lineHeight:1.4,whiteSpace:'normal'}}>업무 대응 가능: {freeText}</div>;
                   } else {
-                    const pills=slots.map(s=>{const st=slotData[`${ds}_${s.id}`];if(!st)return null;const lbl=getSlotLabel(ds,s);return<div key={s.id} style={{fontSize:11,fontWeight:700,padding:'2px 5px',borderRadius:4,background:st==='free'?'#d3f9d8':'#ffe3e3',color:st==='free'?'var(--green)':'var(--red)'}}>{lbl.split('–')[0].trim()}</div>;}).filter(Boolean);
-                    if(pills.length)previewContent=<div style={{display:'flex',flexDirection:'column',gap:3}}>{pills}</div>;
+                    // Показываем слоты: сначала занятия учеников, потом ручные статусы
+                    const pills = slots.map(s => {
+                      const st = slotData[`${ds}_${s.id}`];
+                      const lbl = getSlotLabel(ds, s);
+                      const studentsInSlot = getStudentsForSlot(ds, s);
+                      const timeStart = lbl.split('\u2013')[0].trim();
+                      if (studentsInSlot.length > 0) {
+                        // Занятие ученика — красный приоритет
+                        const names = studentsInSlot.map(r=>r.student.name.split(' ')[0]).join(', ');
+                        return (
+                          <div key={s.id} style={{fontSize:10,fontWeight:700,padding:'2px 5px',borderRadius:4,background:'#ffe3e3',color:'var(--red)',lineHeight:1.3}}>
+                            {timeStart}<br/>{names}
+                          </div>
+                        );
+                      }
+                      if (!st) return null;
+                      return (
+                        <div key={s.id} style={{fontSize:11,fontWeight:700,padding:'2px 5px',borderRadius:4,background:st==='free'?'#d3f9d8':'#ffe3e3',color:st==='free'?'var(--green)':'var(--red)'}}>
+                          {timeStart}
+                        </div>
+                      );
+                    }).filter(Boolean);
+                    if(pills.length) previewContent=<div style={{display:'flex',flexDirection:'column',gap:3}}>{pills}</div>;
                   }
                 }
 
@@ -1073,10 +1152,22 @@ function SchedulePage(){
                         style={{display:'flex',alignItems:'center',gap:10,padding:'12px 14px',borderRadius:9,border:`1.5px solid ${st==='free'?'#86EFAC':st==='busy'?'#FCA5A5':'var(--border)'}`,cursor:'pointer',background:st==='free'?'var(--green-lt)':st==='busy'?'var(--red-lt)':'var(--bg)',transition:'background .12s'}}>
                         <span style={{fontSize:13.5,fontWeight:800,flex:1}}>⏰ {lbl}{isCustom&&<span style={{fontSize:10,color:'var(--purple)',background:'var(--purple-lt)',padding:'1px 5px',borderRadius:4,fontWeight:700,marginLeft:5}}>✦</span>}</span>
                         <span style={{fontSize:12.5,display:'flex',alignItems:'center',gap:4,minWidth:80,flexWrap:'wrap'}}>
-                          {st==='free'&&<><span style={{color:'var(--green)'}}>✓</span><span style={{color:'var(--green)',fontWeight:700}}>{t.slotFree}</span></>}
-                          {st==='busy'&&<><span style={{color:'var(--red)'}}>✕</span><span style={{color:'var(--red)',fontWeight:700}}>{t.slotBusy}</span></>}
-                          {!st&&!studentSlot&&<span style={{color:'var(--ink3)'}}>{t.slotEmpty}</span>}
-                          {studentSlot&&<span style={{color:'var(--blue)',fontWeight:700,fontSize:11}}>🎓 {studentSlot.student.name}</span>}
+                          {(() => {
+                            const studentsHere = getStudentsForSlot(popup.ds, slot);
+                            if (studentsHere.length > 0) {
+                              // Приоритет: занятие ученика
+                              return (
+                                <span style={{color:'var(--red)',fontWeight:700,fontSize:11,lineHeight:1.3}}>
+                                  {lang==='ru'?'Занято':'Busy'}<br/>
+                                  {studentsHere.map(r=>r.student.name.split(' ')[0]).join(', ')}<br/>
+                                  {studentsHere[0].session.time||''}
+                                </span>
+                              );
+                            }
+                            if (st==='free') return <><span style={{color:'var(--green)'}}>✓</span><span style={{color:'var(--green)',fontWeight:700}}>{t.slotFree}</span></>;
+                            if (st==='busy') return <><span style={{color:'var(--red)'}}>✕</span><span style={{color:'var(--red)',fontWeight:700}}>{t.slotBusy}</span></>;
+                            return <span style={{color:'var(--ink3)'}}>{t.slotEmpty}</span>;
+                          })()}
                         </span>
                         <button onClick={e=>{e.stopPropagation();setEditingSlot(isEditing?null:{slotId:slot.id,from:defFrom,to:defTo});}} style={{width:28,height:28,borderRadius:6,border:'none',background:'transparent',cursor:'pointer',fontSize:14,opacity:isEditing?1:.5}}>✏️</button>
                       </div>

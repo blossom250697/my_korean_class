@@ -913,15 +913,22 @@ async def remind_send(cb: CallbackQuery, state: FSMContext):
         d = datetime.fromisoformat(next_s["date"]).strftime("%d.%m.%Y")
         time_str = f" в {next_s['time']}" if next_s.get("time") else ""
 
+        day_diff = get_calendar_day_diff(next_s["date"])
+        title_ru = get_reminder_title(day_diff, "ru")
+        title_en = get_reminder_title(day_diff, "en")
+        if title_ru is None:
+            await cb.message.edit_text(
+                f"\u26a0\ufe0f Нельзя отправить напоминание: дата занятия уже прошла.\n\n"
+                f"\U0001F464 {student['name']}\n\U0001F4C5 {d}"
+            )
+            await state.clear(); await cb.answer(); return
         msg_lesson_ru = (
-            "\U0001F4DA Напоминание!\n\n"
-            "Завтра у вас занятие по корейскому.\n"
+            f"\U0001F4DA {title_ru} по корейскому.\n"
             f"\U0001F4C5 {d}{time_str}\n\n"
             "До встречи! \U0001F4AA"
         )
         msg_lesson_en = (
-            "\U0001F4DA Reminder!\n\n"
-            "You have a Korean lesson tomorrow.\n"
+            f"\U0001F4DA {title_en}.\n"
             f"\U0001F4C5 {d}{time_str}\n\n"
             "See you! \U0001F4AA"
         )
@@ -940,15 +947,22 @@ async def remind_send(cb: CallbackQuery, state: FSMContext):
             await state.clear(); await cb.answer(); return
 
         fmt = f"{debt:,}".replace(",", " ")
+        day_diff = get_calendar_day_diff(next_s["date"])
+        title_ru = get_reminder_title(day_diff, "ru")
+        title_en = get_reminder_title(day_diff, "en")
+        if title_ru is None:
+            await cb.message.edit_text(
+                f"\u26a0\ufe0f Нельзя отправить напоминание: дата занятия уже прошла.\n\n"
+                f"\U0001F464 {student['name']}\n\U0001F4C5 {d}"
+            )
+            await state.clear(); await cb.answer(); return
         msg_lesson_ru = (
-            "\U0001F4DA Напоминание!\n\n"
-            "Завтра у вас занятие по корейскому.\n"
+            f"\U0001F4DA {title_ru} по корейскому.\n"
             f"\U0001F4C5 {d}{time_str}\n\n"
             "До встречи! \U0001F4AA"
         )
         msg_lesson_en = (
-            "\U0001F4DA Reminder!\n\n"
-            "You have a Korean lesson tomorrow.\n"
+            f"\U0001F4DA {title_en}.\n"
             f"\U0001F4C5 {d}{time_str}\n\n"
             "See you! \U0001F4AA"
         )
@@ -1018,17 +1032,92 @@ async def do_cancel_app(cb: CallbackQuery):
     await cb.message.edit_text(f"✅ Заявка отменена. Ученик уведомлён.")
     await cb.answer()
 
-# ── Напоминания ───────────────────────────────────────────────────────────────
+# ── Напоминания ─────────────────────────────────────────────────────────────
+
+# ── Вспомогательные функции для дат (Asia/Seoul) ─────────────────────────────
+
+def get_today_seoul() -> str:
+    """Сегодняшняя дата в Asia/Seoul в формате YYYY-MM-DD"""
+    from datetime import timezone
+    import zoneinfo
+    try:
+        tz = zoneinfo.ZoneInfo("Asia/Seoul")
+    except Exception:
+        # fallback: UTC+9
+        from datetime import timedelta as td
+        return (date.today() + td(hours=9)).isoformat()[:10]
+    from datetime import datetime as dt
+    return dt.now(tz).strftime("%Y-%m-%d")
+
+def get_calendar_day_diff(lesson_date_str: str) -> int:
+    """Разница в календарных днях между сегодня (Seoul) и датой занятия.
+    Положительное = будущее, 0 = сегодня, отрицательное = прошлое."""
+    today_str = get_today_seoul()
+    today_d = date.fromisoformat(today_str)
+    lesson_d = date.fromisoformat(lesson_date_str[:10])
+    return (lesson_d - today_d).days
+
+def pluralize_days(n: int) -> str:
+    """Правильное склонение слова 'день' для русского языка"""
+    mod10, mod100 = n % 10, n % 100
+    if mod10 == 1 and mod100 != 11:
+        return "день"
+    if 2 <= mod10 <= 4 and not (12 <= mod100 <= 14):
+        return "дня"
+    return "дней"
+
+def get_reminder_title(day_diff: int, lang: str) -> str | None:
+    """Возвращает заголовок напоминания в зависимости от разницы дней.
+    None если занятие в прошлом."""
+    if day_diff < 0:
+        return None  # прошлое — не отправляем
+    if lang == "ru":
+        if day_diff == 0: return "Сегодня у вас занятие"
+        if day_diff == 1: return "Завтра у вас занятие"
+        if day_diff == 2: return "Через два дня у вас занятие"
+        return f"У вас занятие через {day_diff} {pluralize_days(day_diff)}"
+    else:
+        if day_diff == 0: return "You have a lesson today"
+        if day_diff == 1: return "You have a lesson tomorrow"
+        if day_diff == 2: return "You have a lesson in two days"
+        return f"You have a lesson in {day_diff} days"
+
+def format_lesson_date(date_str: str) -> str:
+    """Форматирует дату занятия для вывода: 17.07.2026"""
+    return datetime.fromisoformat(date_str[:10]).strftime("%d.%m.%Y")
+
 
 async def send_lesson_reminders():
     log.info("Напоминания о занятиях...")
-    for s in db.get_tomorrow_sessions():
+    sessions = db.get_upcoming_sessions(days_ahead=1)  # сегодня + завтра
+    for s in sessions:
         student = s.get("students")
         if not student or not student.get("telegram_id"): continue
-        lang = student.get("telegram_lang","ru")
-        date_fmt = datetime.fromisoformat(s["date"]).strftime("%d.%m.%Y")
+        if s.get("held"): continue  # уже проведено — пропускаем
+        lang = student.get("telegram_lang", "ru")
+        date_str = s["date"][:10]
+        day_diff = get_calendar_day_diff(date_str)
+        title = get_reminder_title(day_diff, lang)
+        if title is None:
+            log.info(f"Занятие {date_str} уже прошло — пропускаем")
+            continue
+        date_fmt = format_lesson_date(date_str)
+        time_str = f" — {s['time']}" if s.get("time") else ""
+        if lang == "ru":
+            text = (
+                f"\U0001F4DA {title} по корейскому.\n"
+                f"\U0001F4C5 {date_fmt}{time_str}\n\n"
+                "До встречи! \U0001F4AA"
+            )
+        else:
+            text = (
+                f"\U0001F4DA {title}.\n"
+                f"\U0001F4C5 {date_fmt}{time_str}\n\n"
+                "See you! \U0001F4AA"
+            )
         try:
-            await bot.send_message(student["telegram_id"], t(lang, "reminder_lesson", date=date_fmt))
+            await bot.send_message(student["telegram_id"], text)
+            log.info(f"Напоминание ({day_diff}д): {student['name']}")
         except Exception as e:
             log.warning(f"Ошибка: {e}")
 

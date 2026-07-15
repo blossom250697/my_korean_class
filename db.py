@@ -118,6 +118,29 @@ def add_session_direct(session: dict):
     except Exception as e:
         pass
 
+def get_upcoming_sessions(days_ahead: int = 1) -> list:
+    """Занятия сегодня и завтра (days_ahead=1) для напоминаний"""
+    from datetime import date, timedelta
+    today = date.today().isoformat()
+    target = (date.today() + timedelta(days=days_ahead)).isoformat()
+    # Берём занятия от сегодня до target включительно
+    result = []
+    for d in [today, target] if days_ahead >= 1 else [today]:
+        rows = sb._get('sessions', {
+            'date': f'eq.{d}',
+            'held': 'eq.false',
+            'select': '*,students(*)',
+        })
+        result.extend(rows)
+    # Убираем дубликаты если days_ahead=0
+    seen = set()
+    unique = []
+    for r in result:
+        if r['id'] not in seen:
+            seen.add(r['id'])
+            unique.append(r)
+    return unique
+
 def get_tomorrow_sessions():
     tomorrow = (date.today() + timedelta(days=1)).isoformat()
     return sb._get('sessions', {
