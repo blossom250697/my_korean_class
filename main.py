@@ -748,11 +748,11 @@ async def request_lesson_send(cb: CallbackQuery, state: FSMContext):
     kb = InlineKeyboardMarkup(inline_keyboard=[[
         InlineKeyboardButton(
             text="✅ Утвердить занятие",
-            callback_data=f"approve_lesson_{student_id}_{dow}_{time_text}_{cb.from_user.id}_{lang}"
+            callback_data=f"approve_lesson_{student_id}|{dow}|{time_text}|{cb.from_user.id}|{lang}"
         ),
         InlineKeyboardButton(
             text="❌ Отклонить",
-            callback_data=f"reject_lesson_{cb.from_user.id}_{lang}"
+            callback_data=f"reject_lesson_{cb.from_user.id}|{lang}"
         ),
     ]])
     await bot.send_message(TUTOR_ID, notif, parse_mode="HTML", reply_markup=kb)
@@ -828,9 +828,10 @@ async def approve_lesson_request(cb: CallbackQuery):
 @dp.callback_query(F.data.startswith("reject_lesson_"))
 async def reject_lesson_request(cb: CallbackQuery):
     if cb.from_user.id != TUTOR_ID: return
-    parts = cb.data.split("_")
-    student_tg_id = int(parts[2])
-    lang = parts[3] if len(parts) > 3 else "ru"
+    payload = cb.data.replace("reject_lesson_", "", 1)
+    parts = payload.split("|")
+    student_tg_id = int(parts[0])
+    lang = parts[1] if len(parts) > 1 else "ru"
 
     await cb.message.edit_text("❌ Запрос на занятие отклонён.")
 
@@ -962,7 +963,7 @@ async def handle_tutor_buttons(msg: Message, state: FSMContext):
     text = msg.text
 
     if text == "📋 Заявки":
-        await cmd_cancel_app(msg)
+        await cmd_applications(msg, state)
 
     elif text == "👥 Ученики":
         await cmd_students(msg)
@@ -1210,6 +1211,48 @@ async def remind_send(cb: CallbackQuery, state: FSMContext):
     await state.clear()
     await cb.answer()
 
+
+
+# ── /applications — все входящие заявки ──────────────────────────────────────
+
+@dp.message(Command("applications"))
+async def cmd_applications(msg: Message, state: FSMContext):
+    if msg.from_user.id != TUTOR_ID: return
+
+    apps = db.get_new_applications()
+    if not apps:
+        await msg.answer(
+            "📭 <b>Нет новых заявок.</b>\n\n"
+            "Для утверждения расписания: /schedule_set",
+            parse_mode="HTML"
+        )
+        return
+
+    text = f"📋 <b>Новые заявки ({len(apps)}):</b>\n\n"
+    buttons = []
+    for app in apps:
+        freq = {"2x":"2×/нед","3x":"3×/нед"}.get(app.get("frequency",""),"")
+        pref = app.get("preferred_time","—")
+        text += f"👤 <b>{app['name']}</b>\n"
+        text += f"📊 {app.get('level','—')} · {freq}\n"
+        text += f"⏰ {pref}\n"
+        if app.get("message"):
+            text += f"💬 {app['message']}\n"
+        text += "\n"
+        buttons.append([
+            InlineKeyboardButton(
+                text=f"✅ Утвердить расписание — {app['name']}",
+                callback_data=f"pickapp_{app['id']}"
+            ),
+            InlineKeyboardButton(
+                text="❌",
+                callback_data=f"reject_{app['id']}_{app['telegram_id']}_{app.get('lang','ru')}"
+            ),
+        ])
+
+    await msg.answer(text, parse_mode="HTML",
+                     reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons))
+    await state.set_state(ConfirmSchedule.select_app)
 
 # ── /cancel_app — отмена заявок преподавателем ───────────────────────────────
 
