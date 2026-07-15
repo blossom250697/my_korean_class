@@ -740,7 +740,7 @@ async def request_lesson_send(cb: CallbackQuery, state: FSMContext):
     # Сохраняем запрос в базе как заявку типа "lesson_request"
     import uuid as _uuid2
     full_uuid = str(_uuid2.uuid4())
-    req_id = full_uuid.replace("-", "")[:12]  # 12 hex символов для callback
+    req_id = full_uuid.replace("-", "")  # UUID без дефисов = 32 символа, влезает в callback
     db.create_application({
         "id":           full_uuid,  # полный UUID для Supabase
         "telegram_id":  cb.from_user.id,

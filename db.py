@@ -84,16 +84,15 @@ def create_application(data: dict):
     return sb._post('applications', data)
 
 def get_application(app_id: str):
-    """Ищет заявку по полному UUID или по 12-символьному префиксу"""
+    """Ищет заявку по UUID (с дефисами или без)"""
+    # Восстанавливаем дефисы если их нет (32 hex символа -> UUID формат)
+    clean = app_id.replace("-", "")
+    if len(clean) == 32:
+        uuid_str = f"{clean[0:8]}-{clean[8:12]}-{clean[12:16]}-{clean[16:20]}-{clean[20:32]}"
+    else:
+        uuid_str = app_id
     try:
-        # Сначала пробуем точный поиск (полный UUID)
-        r = sb._get('applications', {'id': f'eq.{app_id}', 'select': '*'})
-        return r[0] if r else None
-    except Exception:
-        pass
-    try:
-        # Ищем по началу id через like (для коротких req_id)
-        r = sb._get('applications', {'id': f'like.{app_id}%', 'select': '*'})
+        r = sb._get('applications', {'id': f'eq.{uuid_str}', 'select': '*'})
         return r[0] if r else None
     except Exception:
         return None
