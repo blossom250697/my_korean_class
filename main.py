@@ -737,45 +737,59 @@ async def request_lesson_send(cb: CallbackQuery, state: FSMContext):
     )
     await cb.message.edit_text(text_ru if lang=="ru" else text_en)
 
-    # Уведомление преподавателю с кнопкой утверждения
+    # Сохраняем запрос в базе как заявку типа "lesson_request"
+    import uuid as _uuid2
+    req_id = str(_uuid2.uuid4())[:8]  # короткий ID
+    db.create_application({
+        "id":           req_id,
+        "telegram_id":  cb.from_user.id,
+        "name":         student_name,
+        "level":        "",
+        "frequency":    "",
+        "preferred_time": f"{day_name} {time_text}",
+        "message":      f"dow:{dow}|time:{time_text}|sid:{student_id}|lang:{lang}",
+        "lang":         lang,
+        "status":       "new",
+    })
+
+    # Уведомление преподавателю — короткий callback_data (только req_id)
     notif = (
-        f"📬 <b>Запрос на занятие от ученика!</b>\n\n"
+        f"📬 <b>Запрос на занятие!</b>\n\n"
         f"👤 {student_name}\n"
-        f"📅 День: {day_name}\n"
-        f"⏰ Время: {time_text}\n"
-        f"🆔 student_id: <code>{student_id}</code>"
+        f"📅 {day_name}\n"
+        f"⏰ {time_text}"
     )
     kb = InlineKeyboardMarkup(inline_keyboard=[[
-        InlineKeyboardButton(
-            text="✅ Утвердить занятие",
-            callback_data=f"approve_lesson_{student_id}|{dow}|{time_text}|{cb.from_user.id}|{lang}"
-        ),
-        InlineKeyboardButton(
-            text="❌ Отклонить",
-            callback_data=f"reject_lesson_{cb.from_user.id}|{lang}"
-        ),
+        InlineKeyboardButton(text="✅ Утвердить", callback_data=f"apl_{req_id}"),
+        InlineKeyboardButton(text="❌ Отклонить", callback_data=f"rjl_{req_id}"),
     ]])
     await bot.send_message(TUTOR_ID, notif, parse_mode="HTML", reply_markup=kb)
     await state.clear()
     await cb.answer()
 
-@dp.callback_query(F.data.startswith("approve_lesson_"))
+@dp.callback_query(F.data.startswith("apl_"))
 async def approve_lesson_request(cb: CallbackQuery):
     if cb.from_user.id != TUTOR_ID: return
-    # approve_lesson_{student_id}_{dow}_{time}_{student_tg_id}_{lang}
-    parts = cb.data.split("_")
-    # approve lesson {student_id} {dow} {time} {tg_id} {lang}
-    student_id  = parts[2]
-    dow         = int(parts[3])
-    time_text   = parts[4]
-    student_tg_id = int(parts[5])
-    lang        = parts[6] if len(parts) > 6 else "ru"
+    req_id = cb.data.replace("apl_", "")
+    app = db.get_application(req_id)
+    if not app:
+        await cb.answer("Заявка не найдена", show_alert=True); return
+    # Парсим: dow:{dow}|time:{time}|sid:{student_id}|lang:{lang}
+    try:
+        msg_data = dict(kv.split(":") for kv in app["message"].split("|"))
+        dow           = int(msg_data["dow"])
+        time_text     = msg_data["time"]
+        student_id    = msg_data["sid"]
+        lang          = msg_data.get("lang", "ru")
+    except Exception as e:
+        await cb.answer(f"Ошибка данных: {e}", show_alert=True); return
+    student_tg_id = app["telegram_id"]
 
     # Находим ближайшую дату с этим днём недели
     from datetime import date, timedelta
     today = date.today()
     days_ahead = (dow - today.weekday()) % 7
-    if days_ahead == 0: days_ahead = 7  # если сегодня — берём следующую неделю
+    if days_ahead == 0: days_ahead = 7
     lesson_date = (today + timedelta(days=days_ahead)).isoformat()
 
     # Добавляем занятие в Supabase
@@ -789,13 +803,14 @@ async def approve_lesson_request(cb: CallbackQuery):
         "paid":       False,
     }
     db.add_session_direct(session)
+    db.update_application(req_id, "approved")
 
     # Обновляем сообщение преподавателю
     days_ru = ["Понедельник","Вторник","Среда","Четверг","Пятница","Суббота","Воскресенье"]
     await cb.message.edit_text(
-        f"✅ <b>Занятие утверждено!</b>\n\n"
-        f"📅 {days_ru[dow]}, {lesson_date}\n"
-        f"⏰ {time_text}\n\n"
+        f"\u2705 <b>Занятие утверждено!</b>\n\n"
+        f"\U0001F4C5 {days_ru[dow]}, {lesson_date}\n"
+        f"\u23f0 {time_text}\n\n"
         f"Занятие добавлено в систему.",
         parse_mode="HTML"
     )
@@ -803,21 +818,21 @@ async def approve_lesson_request(cb: CallbackQuery):
     # Уведомление ученику
     from datetime import datetime
     date_fmt = datetime.fromisoformat(lesson_date).strftime("%d.%m.%Y")
-    days_names = ["Понедельник","Вторник","Среда","Четверг","Пятница","Суббота","Воскресенье"]
     days_en = ["Monday","Tuesday","Wednesday","Thursday","Friday","Saturday","Sunday"]
-    day_name = days_names[dow] if lang=="ru" else days_en[dow]
+    day_name_ru = days_ru[dow]
+    day_name_en = days_en[dow]
 
     text_ru = (
-        f"🎉 Занятие утверждено!\n\n"
-        f"📅 {day_name}, {date_fmt}\n"
-        f"⏰ {time_text}\n\n"
-        f"До встречи! 💪"
+        f"\U0001F389 Занятие утверждено!\n\n"
+        f"\U0001F4C5 {day_name_ru}, {date_fmt}\n"
+        f"\u23f0 {time_text}\n\n"
+        f"\U0001F4AA До встречи!"
     )
     text_en = (
-        f"🎉 Lesson confirmed!\n\n"
-        f"📅 {day_name}, {date_fmt}\n"
-        f"⏰ {time_text}\n\n"
-        f"See you! 💪"
+        f"\U0001F389 Lesson confirmed!\n\n"
+        f"\U0001F4C5 {day_name_en}, {date_fmt}\n"
+        f"\u23f0 {time_text}\n\n"
+        f"\U0001F4AA See you!"
     )
     try:
         await bot.send_message(student_tg_id, text_ru if lang=="ru" else text_en)
@@ -825,13 +840,16 @@ async def approve_lesson_request(cb: CallbackQuery):
         log.warning(f"Не удалось уведомить ученика: {e}")
     await cb.answer()
 
-@dp.callback_query(F.data.startswith("reject_lesson_"))
+@dp.callback_query(F.data.startswith("rjl_"))
 async def reject_lesson_request(cb: CallbackQuery):
     if cb.from_user.id != TUTOR_ID: return
-    payload = cb.data.replace("reject_lesson_", "", 1)
-    parts = payload.split("|")
-    student_tg_id = int(parts[0])
-    lang = parts[1] if len(parts) > 1 else "ru"
+    req_id = cb.data.replace("rjl_", "")
+    app = db.get_application(req_id)
+    if not app:
+        await cb.answer("Заявка не найдена", show_alert=True); return
+    student_tg_id = app["telegram_id"]
+    lang = app.get("lang", "ru")
+    db.update_application(req_id, "rejected")
 
     await cb.message.edit_text("❌ Запрос на занятие отклонён.")
 
