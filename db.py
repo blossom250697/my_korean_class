@@ -84,8 +84,19 @@ def create_application(data: dict):
     return sb._post('applications', data)
 
 def get_application(app_id: str):
-    r = sb._get('applications', {'id': f'eq.{app_id}', 'select': '*'})
-    return r[0] if r else None
+    """Ищет заявку по полному UUID или по 12-символьному префиксу"""
+    try:
+        # Сначала пробуем точный поиск (полный UUID)
+        r = sb._get('applications', {'id': f'eq.{app_id}', 'select': '*'})
+        return r[0] if r else None
+    except Exception:
+        pass
+    try:
+        # Ищем по началу id через like (для коротких req_id)
+        r = sb._get('applications', {'id': f'like.{app_id}%', 'select': '*'})
+        return r[0] if r else None
+    except Exception:
+        return None
 
 def get_new_applications():
     return sb._get('applications', {'status': 'eq.new', 'select': '*', 'order': 'created_at'})
