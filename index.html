@@ -227,7 +227,7 @@ const pad   = n => String(n).padStart(2,'0');
 const dKey  = d => `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}`;
 const mLabel = (y,m) => `${MONTHS[m-1]} ${y}`;
 
-function calcDebt(student, sessions, payments) {
+function calcDebt(student, sessions, payments, studentPayments=[]) {
   const sorted = [...sessions].filter(s=>s.student_id===student.id).sort((a,b)=>a.date.localeCompare(b.date));
   const freeCount = student.has_free ? (student.free_count||0) : 0;
   let debtAmount=0; const debtMonths=new Set();
@@ -252,7 +252,9 @@ function calcDebt(student, sessions, payments) {
       debtAmount+=rate; const d=new Date(s.date); debtMonths.add(`${d.getFullYear()}-${d.getMonth()+1}`);
     }
   }
-  return {debtAmount, debtMonths:Array.from(debtMonths)};
+  const paid=(studentPayments||[]).filter(p=>p.student_id===student.id).reduce((s,p)=>s+(+p.amount),0);
+  debtAmount=Math.max(0,debtAmount-paid);
+  return {debtAmount,debtMonths:Array.from(debtMonths),totalPaid:paid};
 }
 
 // ── Контекст данных ───────────────────────────────────────────────────────────
@@ -262,6 +264,7 @@ function DataProvider({children}) {
   const [students, setStudents] = useState([]);
   const [sessions, setSessions] = useState([]);
   const [payments, setPayments] = useState([]);
+  const [studentPayments, setStudentPayments] = useState([]);
   const [loading,  setLoading]  = useState(true);
   const [sync,     setSync]     = useState(null); // null|'saving'|'ok'|'err'
   const syncTimer = useRef(null);
@@ -276,12 +279,13 @@ function DataProvider({children}) {
     setLoading(true);
     try {
       const sb = getSB();
-      const [s, ses, p] = await Promise.all([
+      const [s, ses, p, sp] = await Promise.all([
         sb.select('students'),
         sb.select('sessions'),
         sb.select('monthly_payments'),
+        sb.select('payments','*','','created_at').catch(()=>[]),
       ]);
-      setStudents(s||[]); setSessions(ses||[]); setPayments(p||[]);
+      setStudents(s||[]); setSessions(ses||[]); setPayments(p||[]); setStudentPayments(sp||[]);
     } catch(e) { console.error(e); }
     setLoading(false);
   }, []);
@@ -293,6 +297,21 @@ function DataProvider({children}) {
     try { await fn(); showSync('ok'); }
     catch(e) { showSync('err'); console.error(e); }
   };
+
+  // Платежи
+  const addPayment = (studentId, amount, note) => withSync(async () => {
+    const sb=getSB(), row={id:genId(),student_id:studentId,amount:+amount,note:note||''};
+    await sb.insert('payments',row);
+    setStudentPayments(p=>[...p,row]);
+  });
+  const deletePayment = (id) => withSync(async () => {
+    const sb=getSB(); await sb.delete('payments','id',id);
+    setStudentPayments(p=>p.filter(x=>x.id!==id));
+  });
+  const updateNotes = (studentId, notes) => withSync(async () => {
+    const sb=getSB(); await sb.update('students',{notes},studentId);
+    setStudents(p=>p.map(s=>s.id===studentId?{...s,notes}:s));
+  });
 
   // Ученики
   const addStudent = (data) => withSync(async () => {
@@ -364,6 +383,7 @@ function DataProvider({children}) {
   );
 }
 const useData = () => useContext(DataCtx);
+const fmt = n => new Intl.NumberFormat('ko-KR').format(n)+' ₩';
 
 // ── Форма ученика ─────────────────────────────────────────────────────────────
 const EMPTY = {name:'',level:'',start_date:new Date().toISOString().slice(0,10),has_free:false,free_count:0,frequency:'2x',payment_type:'monthly',notes:''};
@@ -406,8 +426,14 @@ function StudentForm({student, onSave, onClose}) {
 
 // ── Карточка ученика ──────────────────────────────────────────────────────────
 function StudentCard({student, onEdit, onDelete}) {
-  const {sessions, payments} = useData();
-  const {debtAmount, debtMonths} = calcDebt(student, sessions, payments);
+  const {sessions, payments, studentPayments, addPayment, deletePayment, updateNotes} = useData();
+  const {debtAmount, debtMonths, totalPaid} = calcDebt(student, sessions, payments, studentPayments);
+  const myPayments = (studentPayments||[]).filter(p=>p.student_id===student.id);
+  const [showPayForm, setShowPayForm] = useState(false);
+  const [showNotes, setShowNotes] = useState(false);
+  const [payAmount, setPayAmount] = useState('');
+  const [payNote, setPayNote] = useState('');
+  const [notesVal, setNotesVal] = useState(student.notes||'');
   return (
     <div className={`student-card ${debtAmount>0?'has-debt':''}`}>
       <div className="card-top">
@@ -435,6 +461,57 @@ function StudentCard({student, onEdit, onDelete}) {
           <span style={{fontSize:11,color:'var(--ink3)'}}>· {debtMonths.map(k=>{const[y,m]=k.split('-');return mLabel(+y,+m);}).join(', ')}</span>
         </div>
       ):<div className="no-debt">✓ Нет задолженностей</div>}
+
+      {/* История платежей */}
+      {myPayments.length>0&&(
+        <div style={{marginTop:8,padding:'7px 9px',background:'var(--green-lt)',borderRadius:7,fontSize:12}}>
+          <div style={{fontWeight:700,color:'var(--green)',marginBottom:4}}>💰 Внесено: {fmt(totalPaid)}</div>
+          {myPayments.map(p=>(
+            <div key={p.id} style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:2}}>
+              <span style={{color:'var(--ink2)'}}>{fmt(p.amount)}{p.note?' · '+p.note:''}</span>
+              <button onClick={()=>deletePayment(p.id)} style={{background:'none',border:'none',color:'var(--ink3)',cursor:'pointer',fontSize:12}}>✕</button>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Форма внесения платежа */}
+      {showPayForm&&(
+        <div style={{marginTop:8,display:'flex',gap:6,flexWrap:'wrap'}}>
+          <input type="number" placeholder="Сумма ₩" value={payAmount} onChange={e=>setPayAmount(e.target.value)}
+            style={{width:100,padding:'5px 8px',border:'1.5px solid var(--border)',borderRadius:7,fontSize:13}}/>
+          <input type="text" placeholder="Заметка (необяз.)" value={payNote} onChange={e=>setPayNote(e.target.value)}
+            style={{flex:1,minWidth:100,padding:'5px 8px',border:'1.5px solid var(--border)',borderRadius:7,fontSize:13}}/>
+          <button onClick={()=>{if(payAmount){addPayment(student.id,payAmount,payNote);setPayAmount('');setPayNote('');setShowPayForm(false);}}}
+            className="btn btn-primary" style={{padding:'5px 12px',fontSize:13}}>✓</button>
+          <button onClick={()=>setShowPayForm(false)} className="btn btn-ghost" style={{padding:'5px 10px',fontSize:13}}>✕</button>
+        </div>
+      )}
+
+      {/* Пометки */}
+      {showNotes&&(
+        <div style={{marginTop:8}}>
+          <textarea value={notesVal} onChange={e=>setNotesVal(e.target.value)} rows={3}
+            placeholder="Пометки по ученику..."
+            style={{width:'100%',padding:'7px 9px',border:'1.5px solid var(--border)',borderRadius:7,fontSize:13,resize:'vertical'}}/>
+          <div style={{display:'flex',gap:6,marginTop:5}}>
+            <button onClick={()=>{updateNotes(student.id,notesVal);setShowNotes(false);}} className="btn btn-primary" style={{fontSize:12,padding:'4px 12px'}}>Сохранить</button>
+            <button onClick={()=>setShowNotes(false)} className="btn btn-ghost" style={{fontSize:12,padding:'4px 10px'}}>Отмена</button>
+          </div>
+        </div>
+      )}
+
+      {/* Кнопки внизу карточки */}
+      <div style={{display:'flex',gap:6,marginTop:8,flexWrap:'wrap'}}>
+        <button onClick={()=>setShowPayForm(p=>!p)} className="btn btn-ghost"
+          style={{fontSize:12,padding:'4px 10px',color:'var(--green)',borderColor:'var(--green)'}}>
+          💰 + Оплата
+        </button>
+        <button onClick={()=>{setShowNotes(p=>!p);setNotesVal(student.notes||'');}} className="btn btn-ghost"
+          style={{fontSize:12,padding:'4px 10px'}}>
+          📝 {student.notes?'Пометки ✓':'Пометки'}
+        </button>
+      </div>
     </div>
   );
 }
