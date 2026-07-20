@@ -370,7 +370,7 @@ function DataProvider({children}) {
   });
 
   return (
-    <DataCtx.Provider value={{students,sessions,payments,loading,addStudent,updateStudent,deleteStudent,addSession,removeSession,toggleSession,setMonthPayment,updateSessionTime,reload:loadAll}}>
+    <DataCtx.Provider value={{students,sessions,payments,studentPayments,loading,addStudent,updateStudent,deleteStudent,addSession,removeSession,toggleSession,setMonthPayment,updateSessionTime,addPayment,deletePayment,updateNotes,reload:loadAll}}>
       {children}
       {sync && (
         <div className={`sync-bar ${sync==='saving'?'':sync}`}>
