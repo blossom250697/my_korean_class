@@ -383,7 +383,6 @@ function DataProvider({children}) {
   );
 }
 const useData = () => useContext(DataCtx);
-const fmt = n => new Intl.NumberFormat('ko-KR').format(n)+' ₩';
 
 // ── Форма ученика ─────────────────────────────────────────────────────────────
 const EMPTY = {name:'',level:'',start_date:new Date().toISOString().slice(0,10),has_free:false,free_count:0,frequency:'2x',payment_type:'monthly',notes:''};
