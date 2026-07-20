@@ -777,10 +777,15 @@ async def approve_lesson_request(cb: CallbackQuery):
     app = db.get_application(req_id)
     log.info(f"approve_lesson: app={app}")
     if not app:
-        # Попробуем найти все новые заявки и показать их ID
+        # Fallback: ищем последнюю заявку с lesson_request (level - число)
         all_apps = db.get_new_applications()
         log.info(f"approve_lesson: all new apps={[a['id'] for a in all_apps]}")
-        await cb.answer("Заявка не найдена", show_alert=True); return
+        lesson_apps = [a for a in all_apps if str(a.get("level","")).isdigit()]
+        if lesson_apps:
+            app = lesson_apps[-1]  # берём последнюю
+            log.info(f"approve_lesson: using fallback app={app['id']}")
+        else:
+            await cb.answer("Заявка не найдена", show_alert=True); return
     # Парсим: dow:{dow}|time:{time}|sid:{student_id}|lang:{lang}
     dow           = int(app["level"])      # день недели
     time_text     = app["frequency"]       # время
@@ -990,7 +995,7 @@ async def handle_tutor_buttons(msg: Message, state: FSMContext):
         await cmd_students(msg)
 
     elif text == "📅 Расписание":
-        await cmd_schedule_set(msg, state)
+        await cmd_schedule_menu(msg, state)
 
     elif text == "💸 Должники":
         await cmd_debtors(msg)
@@ -1347,6 +1352,158 @@ async def do_cancel_app(cb: CallbackQuery):
         pass
 
     await cb.message.edit_text(f"✅ Заявка отменена. Ученик уведомлён.")
+    await cb.answer()
+
+
+# ── Кнопка 📅 Расписание ──────────────────────────────────────────────────────
+
+@dp.message(Command("schedule_menu"))
+async def cmd_schedule_menu(msg: Message, state: FSMContext):
+    if msg.from_user.id != TUTOR_ID: return
+
+    students = db.get_all_students()
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="🗓 Моё расписание на эту неделю",        callback_data="smenu_week")],
+        [InlineKeyboardButton(text="📋 Список учеников с расписанием",       callback_data="smenu_list")],
+        [InlineKeyboardButton(text="✏️ Редактировать расписание ученика",    callback_data="smenu_edit")],
+        [InlineKeyboardButton(text="➕ Утвердить расписание новому ученику", callback_data="smenu_new")],
+    ])
+    await msg.answer("📅 <b>Расписание</b>\n\nЧто хотите сделать?",
+                     parse_mode="HTML", reply_markup=kb)
+
+
+@dp.callback_query(F.data == "smenu_week")
+async def smenu_week(cb: CallbackQuery):
+    from datetime import date, timedelta
+    today = date.today()
+    # Начало недели (понедельник)
+    monday = today - timedelta(days=today.weekday())
+    days_ru = ["Пн","Вт","Ср","Чт","Пт","Сб","Вс"]
+
+    # Берём занятия на эту неделю
+    students = db.get_all_students()
+    student_map = {s["id"]: s["name"] for s in students}
+
+    # Собираем занятия по дням
+    week_sessions = {}
+    for i in range(7):
+        day = monday + timedelta(days=i)
+        day_str = day.isoformat()
+        sessions = db._get("sessions", {
+            "date": f"eq.{day_str}",
+            "select": "*",
+            "order": "time"
+        })
+        if sessions:
+            week_sessions[day] = sessions
+
+    if not week_sessions:
+        await cb.message.edit_text(
+            "📅 <b>Расписание на эту неделю</b>\n\n"
+            "Занятий не запланировано.",
+            parse_mode="HTML"
+        )
+        await cb.answer(); return
+
+    lines = [f"📅 <b>Расписание {monday.strftime('%d.%m')}–{(monday+timedelta(days=6)).strftime('%d.%m')}</b>\n"]
+
+    for i in range(7):
+        day = monday + timedelta(days=i)
+        if day not in week_sessions: continue
+
+        day_label = f"{'🔵 ' if day == today else ''}<b>{days_ru[i]}, {day.strftime('%d.%m')}</b>"
+        lines.append(day_label)
+
+        for s in week_sessions[day]:
+            name = student_map.get(s["student_id"], "Неизвестный")
+            time_str = f" {s['time']}" if s.get("time") else ""
+            held = " ✓" if s.get("held") else ""
+            lines.append(f"  👤 {name}{time_str}{held}")
+        lines.append("")
+
+    await cb.message.edit_text("\n".join(lines), parse_mode="HTML")
+    await cb.answer()
+
+@dp.callback_query(F.data == "smenu_new")
+async def smenu_new(cb: CallbackQuery, state: FSMContext):
+    await cb.message.delete()
+    await cmd_schedule_set(cb.message, state)
+    await cb.answer()
+
+@dp.callback_query(F.data == "smenu_list")
+async def smenu_list(cb: CallbackQuery):
+    students = db.get_all_students()
+    if not students:
+        await cb.answer("Учеников нет", show_alert=True); return
+
+    lines = ["👥 <b>Расписание учеников:</b>\n"]
+    for s in students:
+        sched = db.get_student_schedule(s["id"])
+        if sched:
+            days = ["Пн","Вт","Ср","Чт","Пт","Сб","Вс"]
+            sched_str = ", ".join(f"{days[r['dow']]} {r['time']}" for r in sched)
+            lines.append(f"👤 <b>{s['name']}</b>\n   📅 {sched_str}")
+        else:
+            lines.append(f"👤 <b>{s['name']}</b>\n   — расписание не задано")
+        lines.append("")
+
+    await cb.message.edit_text("\n".join(lines), parse_mode="HTML")
+    await cb.answer()
+
+@dp.callback_query(F.data == "smenu_edit")
+async def smenu_edit(cb: CallbackQuery, state: FSMContext):
+    students = db.get_all_students()
+    if not students:
+        await cb.answer("Учеников нет", show_alert=True); return
+
+    buttons = [[InlineKeyboardButton(text=f"👤 {s['name']}", callback_data=f"sedit_{s['id']}")]
+               for s in students]
+    buttons.append([InlineKeyboardButton(text="❌ Отмена", callback_data="sedit_cancel")])
+
+    await cb.message.edit_text(
+        "✏️ <b>Выбери ученика для редактирования расписания:</b>",
+        parse_mode="HTML",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons)
+    )
+    await cb.answer()
+
+@dp.callback_query(F.data == "sedit_cancel")
+async def sedit_cancel(cb: CallbackQuery):
+    await cb.message.edit_text("Отменено.")
+    await cb.answer()
+
+@dp.callback_query(F.data.startswith("sedit_"))
+async def sedit_student(cb: CallbackQuery, state: FSMContext):
+    if cb.data == "sedit_cancel": return
+    student_id = cb.data.replace("sedit_", "")
+    student = next((s for s in db.get_all_students() if s["id"] == student_id), None)
+    if not student:
+        await cb.answer("Ученик не найден", show_alert=True); return
+
+    sched = db.get_student_schedule(student_id)
+    days = ["Пн","Вт","Ср","Чт","Пт","Сб","Вс"]
+
+    current = ""
+    if sched:
+        current = "\n".join(f"  {days[r['dow']]} — {r['time']}" for r in sched)
+    else:
+        current = "  — не задано"
+
+    await state.update_data(
+        app_id=None,
+        app={"name": student["name"], "level": student.get("level",""), "telegram_id": student.get("telegram_id"), "message": ""},
+        app_id_real=student_id,
+        edit_student_id=student_id,
+        selected_days=[], frequency=student.get("frequency","2x")
+    )
+
+    await cb.message.edit_text(
+        f"✏️ <b>{student['name']}</b>\n\nТекущее расписание:\n{current}\n\n"
+        f"Выбери новые <b>дни недели</b>:",
+        parse_mode="HTML",
+        reply_markup=days_kb([])
+    )
+    await state.set_state(ConfirmSchedule.days)
     await cb.answer()
 
 # ── Напоминания ─────────────────────────────────────────────────────────────
