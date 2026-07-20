@@ -179,6 +179,12 @@ def get_student_debt(student_id: str) -> int:
     free_count = student['free_count'] if student['has_free'] else 0
     held = sorted([s for s in sessions if s['held']], key=lambda s: s['date'])
     debt = 0
+    # Вычитаем внесённые частичные платежи
+    try:
+        student_payments = sb._get('payments', {'student_id': f'eq.{student_id}', 'select': '*'})
+        paid_amount = sum(p['amount'] for p in student_payments)
+    except Exception:
+        paid_amount = 0
 
     if student['payment_type'] == 'monthly':
         paid_months = {(p['year'], p['month']) for p in payments if p['paid']}
@@ -195,6 +201,7 @@ def get_student_debt(student_id: str) -> int:
         for i, s in enumerate(held):
             if i >= free_count and not s['paid']:
                 debt += rate
+    debt = max(0, debt - paid_amount)
     return debt
 
 def get_students_with_debt():
