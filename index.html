@@ -668,8 +668,8 @@ function CalendarPage() {
 }
 
 function DebtsPage() {
-  const {students,sessions,payments}=useData();
-  const debtors=students.map(s=>({student:s,...calcDebt(s,sessions,payments)})).filter(d=>d.debtAmount>0).sort((a,b)=>b.debtAmount-a.debtAmount);
+  const {students,sessions,payments,studentPayments}=useData();
+  const debtors=students.map(s=>({student:s,...calcDebt(s,sessions,payments,studentPayments)})).filter(d=>d.debtAmount>0).sort((a,b)=>b.debtAmount-a.debtAmount);
   const total=debtors.reduce((s,d)=>s+d.debtAmount,0);
   return (
     <div className="page">
@@ -700,7 +700,7 @@ function ReportsPage() {
   const today=new Date();
   const [year,setYear]=useState(today.getFullYear());
   const [month,setMonth]=useState(today.getMonth()+1);
-  const {students,sessions,payments}=useData();
+  const {students,sessions,payments,studentPayments}=useData();
   const prev=()=>{if(month===1){setMonth(12);setYear(y=>y-1);}else setMonth(m=>m-1);};
   const next=()=>{if(month===12){setMonth(1);setYear(y=>y+1);}else setMonth(m=>m+1);};
   const active=students.filter(s=>sessions.some(ses=>{if(ses.student_id!==s.id)return false;const d=new Date(ses.date);return d.getFullYear()===year&&d.getMonth()+1===month;}));
@@ -718,7 +718,7 @@ function ReportsPage() {
     const paidS=myS.filter(x=>{const d=new Date(x.date);return d.getFullYear()===year&&d.getMonth()+1===month&&x.held&&x.paid&&allHeld.findIndex(y=>y.id===x.id)+1>fc;});
     return sum+paidS.length*sRate(s.frequency);
   },0);
-  const totalDebt=students.reduce((s,x)=>s+calcDebt(x,sessions,payments).debtAmount,0);
+  const totalDebt=students.reduce((s,x)=>s+calcDebt(x,sessions,payments,studentPayments).debtAmount,0);
   const allTime=students.reduce((sum,s)=>{
     const myS=sessions.filter(x=>x.student_id===s.id);
     if(s.payment_type==='monthly'){const pM=payments.filter(p=>p.student_id===s.id&&p.paid).length;return sum+pM*MONTHLY_RATES[s.frequency];}
@@ -726,7 +726,7 @@ function ReportsPage() {
     const pC=myS.filter(x=>x.held&&x.paid&&allHeld.findIndex(y=>y.id===x.id)+1>fc).length;
     return sum+pC*sRate(s.frequency);
   },0);
-  const debtors=students.map(s=>({student:s,...calcDebt(s,sessions,payments)})).filter(d=>d.debtAmount>0);
+  const debtors=students.map(s=>({student:s,...calcDebt(s,sessions,payments,studentPayments)})).filter(d=>d.debtAmount>0);
   return (
     <div className="page">
       <div className="page-header">
@@ -1350,7 +1350,7 @@ const TABS = [
 function Shell() {
   const [tab, setTab] = useState('students');
   const {students, sessions, payments} = useData();
-  const debtorCount = students.filter(s=>calcDebt(s,sessions,payments).debtAmount>0).length;
+  const debtorCount = students.filter(s=>calcDebt(s,sessions,payments,studentPayments).debtAmount>0).length;
   return (
     <div className="app-shell">
       <nav className="sidebar">
