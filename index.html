@@ -1349,8 +1349,8 @@ const TABS = [
 
 function Shell() {
   const [tab, setTab] = useState('students');
-  const {students, sessions, payments} = useData();
-  const debtorCount = students.filter(s=>calcDebt(s,sessions,payments,studentPayments).debtAmount>0).length;
+  const {students, sessions, payments, studentPayments} = useData();
+  const debtorCount = students.filter(s=>calcDebt(s,sessions,payments,studentPayments||[]).debtAmount>0).length;
   return (
     <div className="app-shell">
       <nav className="sidebar">
