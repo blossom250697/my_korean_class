@@ -124,6 +124,18 @@ def get_pending_application(telegram_id: int):
 
 # ── Занятия ───────────────────────────────────────────────────────────────────
 
+
+def get_sessions_for_date(date_str: str) -> list:
+    """Все занятия на конкретную дату (для проверки свободных окон)"""
+    try:
+        return sb._get('sessions', {
+            'date': f'eq.{date_str}',
+            'select': '*',
+            'order': 'time',
+        })
+    except Exception:
+        return []
+
 def get_sessions_for_student(student_id: str):
     return sb._get('sessions', {'student_id': f'eq.{student_id}', 'select': '*', 'order': 'date'})
 
