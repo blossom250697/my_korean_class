@@ -21,7 +21,7 @@ from aiogram.types import (
 )
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
-from new_config import (
+from config import (
     BOT_TOKEN, TUTOR_ID, TEXTS,
     WELCOME_TEXT, FORMAT_TEXT, PRICING_TEXT,
     PAYMENT_TERMS_TEXT, TRIAL_INFO_TEXT, CONTACT_TEXT,
