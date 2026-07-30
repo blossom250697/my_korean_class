@@ -125,17 +125,6 @@ def get_pending_application(telegram_id: int):
 # ── Занятия ───────────────────────────────────────────────────────────────────
 
 
-def get_sessions_for_date(date_str: str) -> list:
-    """Все занятия на конкретную дату (для проверки свободных окон)"""
-    try:
-        return sb._get('sessions', {
-            'date': f'eq.{date_str}',
-            'select': '*',
-            'order': 'time',
-        })
-    except Exception:
-        return []
-
 def get_sessions_for_student(student_id: str):
     return sb._get('sessions', {'student_id': f'eq.{student_id}', 'select': '*', 'order': 'date'})
 
@@ -176,10 +165,93 @@ def get_tomorrow_sessions():
         'select': '*,students(*)',
     })
 
-# ── Оплата ────────────────────────────────────────────────────────────────────
 
-MONTHLY_RATES = {'2x': 300000, '3x': 450000}
-SESSION_RATES = {'2x': 37500,  '3x': 37500}
+# ── RPC атомарные операции ────────────────────────────────────────────────────
+
+def confirm_lesson_atomic(app_id: str, student_id: str, lesson_date: str,
+                           lesson_time: str, session_id: str) -> dict:
+    """
+    Атомарное подтверждение занятия через Supabase RPC.
+    Защищает от двойного бронирования и повторного подтверждения.
+    """
+    import logging
+    log = logging.getLogger(__name__)
+    import httpx
+
+    headers = {**sb.headers, 'Prefer': 'return=representation'}
+    try:
+        with httpx.Client() as client:
+            r = client.post(
+                f"{sb.url}/rest/v1/rpc/confirm_lesson",
+                headers=headers,
+                json={
+                    'p_app_id':     app_id,
+                    'p_student_id': student_id,
+                    'p_date':       lesson_date,
+                    'p_time':       lesson_time,
+                    'p_session_id': session_id,
+                }
+            )
+            if r.status_code == 200:
+                result = r.json()
+                log.info(f"confirm_lesson_atomic: {result}")
+                return result
+            else:
+                log.error(f"confirm_lesson_atomic HTTP {r.status_code}: {r.text}")
+                return {'ok': False, 'reason': f'http_{r.status_code}'}
+    except Exception as e:
+        log.error(f"confirm_lesson_atomic exception: {e}")
+        return {'ok': False, 'reason': str(e)}
+
+def reschedule_lesson_atomic(old_session_id: str, new_session_id: str,
+                              student_id: str, new_date: str, new_time: str,
+                              reason: str = None) -> dict:
+    """Атомарный перенос занятия"""
+    import httpx
+    try:
+        with httpx.Client() as client:
+            r = client.post(
+                f"{sb.url}/rest/v1/rpc/reschedule_lesson",
+                headers=sb.headers,
+                json={
+                    'p_old_session_id': old_session_id,
+                    'p_new_session_id': new_session_id,
+                    'p_student_id':     student_id,
+                    'p_new_date':       new_date,
+                    'p_new_time':       new_time,
+                    'p_reason':         reason or '',
+                }
+            )
+            return r.json() if r.status_code == 200 else {'ok': False, 'reason': f'http_{r.status_code}'}
+    except Exception as e:
+        return {'ok': False, 'reason': str(e)}
+
+def cancel_lesson_atomic(session_id: str, reason: str = None) -> dict:
+    """Атомарная отмена занятия"""
+    import httpx
+    try:
+        with httpx.Client() as client:
+            r = client.post(
+                f"{sb.url}/rest/v1/rpc/cancel_lesson",
+                headers=sb.headers,
+                json={'p_session_id': session_id, 'p_reason': reason or ''}
+            )
+            return r.json() if r.status_code == 200 else {'ok': False, 'reason': f'http_{r.status_code}'}
+    except Exception as e:
+        return {'ok': False, 'reason': str(e)}
+
+def get_active_sessions_for_student(student_id: str) -> list:
+    """Только активные (не отменённые и не перенесённые) занятия ученика"""
+    try:
+        return sb._get('sessions', {
+            'student_id': f'eq.{student_id}',
+            'status':     'eq.scheduled',
+            'select':     '*',
+            'order':      'date',
+        })
+    except Exception:
+        # Fallback если колонка status ещё не добавлена
+        return get_sessions_for_student(student_id)
 
 def get_student_debt(student_id: str) -> int:
     students = sb._get('students', {'id': f'eq.{student_id}', 'select': '*'})
@@ -258,3 +330,7 @@ def save_student_schedule(student_id: str, day_times: dict) -> None:
                 }, prefer='return=minimal')
         except Exception as e:
             pass
+
+def _patch_session_status(session_id: str, status: str) -> None:
+    """Обновляет статус занятия"""
+    sb._patch('sessions', {'status': status, 'cancelled_at': 'now()'}, {'id': session_id})

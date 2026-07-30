@@ -85,6 +85,13 @@ class BookLesson(StatesGroup):
     time_select = State()
     confirm     = State()
 
+
+class RescheduleLesson(StatesGroup):
+    select_session = State()  # выбор занятия для переноса
+    date_select    = State()  # новая дата
+    time_select    = State()  # новое время
+    confirm        = State()  # подтверждение
+
 class ContactTeacher(StatesGroup):
     waiting_message = State()
 
@@ -95,6 +102,13 @@ class ScheduleSetup(StatesGroup):
     day_times  = State()
     has_free   = State()
     confirm    = State()
+
+
+class RescheduleLesson(StatesGroup):
+    session_select = State()
+    date_select    = State()
+    time_select    = State()
+    confirm        = State()
 
 class RemindForm(StatesGroup):
     type_select    = State()
@@ -119,6 +133,8 @@ def student_kb(lang: str, has_pending: bool = False, has_upcoming: bool = False)
             [KeyboardButton(text="📚 Формат занятий"),        KeyboardButton(text="💳 Стоимость и оплата")],
             [KeyboardButton(text="💬 Связаться с преподавателем")],
         ]
+        if has_upcoming:
+            rows.insert(2, [KeyboardButton(text="🔄 Перенести занятие")])
         if has_pending:
             rows.append([KeyboardButton(text="🚫 Отозвать заявку")])
     else:
@@ -127,6 +143,8 @@ def student_kb(lang: str, has_pending: bool = False, has_upcoming: bool = False)
             [KeyboardButton(text="📚 Lesson format"),     KeyboardButton(text="💳 Pricing & payment")],
             [KeyboardButton(text="💬 Contact teacher")],
         ]
+        if has_upcoming:
+            rows.insert(2, [KeyboardButton(text="🔄 Reschedule lesson")])
         if has_pending:
             rows.append([KeyboardButton(text="🚫 Cancel application")])
     return ReplyKeyboardMarkup(keyboard=rows, resize_keyboard=True, persistent=True)
@@ -275,9 +293,12 @@ async def cmd_start(msg: Message, state: FSMContext):
     if student:
         lang = student.get("telegram_lang", lang)
         pending = db.get_pending_application(msg.from_user.id)
+        sessions = db.get_sessions_for_student(student["id"])
+        today_str = today_seoul().isoformat()
+        upcoming = [s for s in sessions if s.get("date","") >= today_str and not s.get("held") and s.get("status","scheduled") != "cancelled"]
         await msg.answer(
             WELCOME_TEXT[lang],
-            reply_markup=student_kb(lang, has_pending=bool(pending))
+            reply_markup=student_kb(lang, has_pending=bool(pending), has_upcoming=bool(upcoming))
         )
     else:
         await msg.answer(WELCOME_TEXT[lang], reply_markup=new_user_kb(lang))
@@ -834,65 +855,37 @@ async def approve_lesson_request(cb: CallbackQuery):
 
     app = db.get_application(req_id)
 
-    # Fallback: последняя новая заявка с lesson_request типом
+    # Fallback: последняя новая lesson_request заявка
     if not app:
         all_apps = db.get_new_applications()
-        lesson_apps = [a for a in all_apps if str(a.get("message","")).count("-") == 4]  # UUID формат
+        lesson_apps = [a for a in all_apps if str(a.get("message","")).count("-") == 4]
         if lesson_apps:
             app = sorted(lesson_apps, key=lambda a: a.get("created_at",""))[-1]
-            log.info(f"approve_lesson: using fallback app={app['id']}")
+            log.info(f"approve_lesson: fallback app={app['id']}")
         else:
             await cb.answer("Заявка не найдена", show_alert=True); return
 
     # Защита от повторного подтверждения
     if app.get("status") in ("approved", "rejected", "cancelled"):
-        await cb.message.edit_text(
-            f"{'Это занятие уже было подтверждено.' if app['status']=='approved' else 'Заявка уже обработана.'}"
-        )
+        status_text = {
+            "approved":  "Это занятие уже подтверждено ✅",
+            "rejected":  "Заявка уже была отклонена.",
+            "cancelled": "Заявка была отменена.",
+        }.get(app["status"], "Заявка уже обработана.")
+        await cb.message.edit_text(status_text)
         await cb.answer(); return
 
-    # Получаем данные
-    student_id    = app.get("message", "")  # student_id хранится в message
-    time_text     = app.get("frequency", "")
+    # Парсим данные
+    student_id    = app.get("message", "")
     preferred     = app.get("preferred_time", "")
     lang          = app.get("lang", "ru")
     student_tg_id = app["telegram_id"]
 
-    # Парсим дату из preferred_time (формат "2026-07-17 11:00")
     parts = preferred.strip().split()
     lesson_date_str = parts[0] if parts else ""
-    lesson_time     = parts[1] if len(parts) > 1 else time_text
+    lesson_time     = parts[1] if len(parts) > 1 else app.get("frequency", "")
 
-    # Повторная проверка доступности
-    if lesson_date_str:
-        try:
-            ld = date.fromisoformat(lesson_date_str)
-            slots = get_free_slots(ld)
-            if lesson_time and lesson_time not in slots:
-                await cb.answer(f"Время {lesson_time} уже занято!", show_alert=True)
-                return
-        except Exception as e:
-            log.warning(f"Date check failed: {e}")
-
-    # Создаём занятие (одна операция)
-    session = {
-        "id":         str(uuid.uuid4()),
-        "student_id": student_id,
-        "date":       lesson_date_str or date.today().isoformat(),
-        "time":       lesson_time,
-        "held":       False,
-        "paid":       False,
-    }
-
-    try:
-        db.add_session_direct(session)
-        db.update_application(app["id"], "approved")
-        log.info(f"approve_lesson: session created {session['id']}, app {app['id']} approved")
-    except Exception as e:
-        log.error(f"approve_lesson error: {e}")
-        await cb.answer("Ошибка при создании занятия", show_alert=True); return
-
-    # Форматируем дату для сообщений
+    # Форматируем дату
     days_ru = ["Пн","Вт","Ср","Чт","Пт","Сб","Вс"]
     try:
         ld = date.fromisoformat(lesson_date_str)
@@ -900,20 +893,59 @@ async def approve_lesson_request(cb: CallbackQuery):
         date_fmt = f"{dow}, {fmt_date(ld)}"
     except Exception:
         date_fmt = lesson_date_str
+        ld = None
+
+    # Атомарное подтверждение через RPC
+    session_id = str(uuid.uuid4())
+    result = db.confirm_lesson_atomic(
+        app_id=app["id"],
+        student_id=student_id,
+        lesson_date=lesson_date_str,
+        lesson_time=lesson_time,
+        session_id=session_id,
+    )
+
+    if not result.get("ok"):
+        reason = result.get("reason", "unknown")
+        log.warning(f"approve_lesson failed: {reason}")
+        if reason == "already_processed":
+            await cb.message.edit_text("Это занятие уже было подтверждено ✅")
+        elif reason == "time_conflict":
+            await cb.answer(f"Время {lesson_time} уже занято другим учеником!", show_alert=True)
+        else:
+            # Fallback: пробуем без RPC (если функция ещё не создана в Supabase)
+            log.info(f"approve_lesson: RPC failed ({reason}), using fallback")
+            try:
+                db.add_session_direct({
+                    "id": session_id, "student_id": student_id,
+                    "date": lesson_date_str, "time": lesson_time,
+                    "held": False, "paid": False, "status": "scheduled",
+                })
+                db.update_application(app["id"], "approved")
+                log.info(f"approve_lesson: fallback OK")
+            except Exception as e:
+                log.error(f"approve_lesson fallback error: {e}")
+                await cb.answer("Ошибка при создании занятия", show_alert=True); return
+        if reason not in ("time_conflict",):
+            pass
+        else:
+            await cb.answer(); return
+
+    log.info(f"approve_lesson: confirmed session={session_id}")
 
     # Обновляем сообщение преподавателю
     await cb.message.edit_text(
         f"✅ <b>Занятие подтверждено!</b>\n\n"
-        f"👤 Ученик: {app['name']}\n"
+        f"👤 {app['name']}\n"
         f"📅 {date_fmt}\n"
         f"⏰ {lesson_time}",
         parse_mode="HTML"
     )
 
     # Уведомляем ученика
-    confirmed_text = t(lang, "lesson_confirmed", date=date_fmt, time=lesson_time)
     try:
-        await bot.send_message(student_tg_id, confirmed_text)
+        await bot.send_message(student_tg_id,
+            t(lang, "lesson_confirmed", date=date_fmt, time=lesson_time))
     except Exception as e:
         log.warning(f"Could not notify student: {e}")
 
@@ -1334,6 +1366,276 @@ async def sched_confirm(cb: CallbackQuery, state: FSMContext):
         except Exception: pass
     await state.clear(); await cb.answer()
 
+
+# ── Перенос занятия ───────────────────────────────────────────────────────────
+
+@dp.message(F.text.in_({"🔄 Перенести занятие", "🔄 Reschedule lesson"}))
+async def cmd_reschedule(msg: Message, state: FSMContext):
+    lang = get_lang(msg.from_user)
+    student = db.get_student_by_telegram(msg.from_user.id)
+    if not student:
+        await msg.answer("Вы ещё не зарегистрированы." if lang=="ru" else "You are not registered."); return
+    lang = student.get("telegram_lang", lang)
+
+    sessions = db.get_sessions_for_student(student["id"])
+    today_str = today_seoul().isoformat()
+    upcoming = sorted(
+        [s for s in sessions if s.get("date","") >= today_str
+         and not s.get("held") and s.get("status","scheduled") not in ("cancelled","rescheduled")],
+        key=lambda s: (s["date"], s.get("time",""))
+    )
+
+    if not upcoming:
+        await msg.answer("📅 Нет предстоящих занятий для переноса." if lang=="ru"
+                         else "📅 No upcoming lessons to reschedule."); return
+
+    days_ru = ["Пн","Вт","Ср","Чт","Пт","Сб","Вс"]
+    buttons = []
+    for s in upcoming[:5]:
+        d = date.fromisoformat(s["date"])
+        dow = days_ru[d.weekday()]
+        time_str = f" {s['time']}" if s.get("time") else ""
+        label = f"📅 {dow}, {fmt_date(d)}{time_str}"
+        buttons.append([InlineKeyboardButton(text=label, callback_data=f"rsch_{s['id']}")])
+    buttons.append([InlineKeyboardButton(text="❌ Отмена" if lang=="ru" else "❌ Cancel",
+                                         callback_data="rsch_cancel")])
+
+    await state.update_data(student_id=student["id"], student_name=student["name"], lang=lang)
+    await msg.answer(
+        "🔄 <b>Какое занятие перенести?</b>" if lang=="ru" else "🔄 <b>Which lesson to reschedule?</b>",
+        parse_mode="HTML",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons)
+    )
+    await state.set_state(RescheduleLesson.session_select)
+
+@dp.callback_query(RescheduleLesson.session_select, F.data.startswith("rsch_"))
+async def rsch_session_selected(cb: CallbackQuery, state: FSMContext):
+    if cb.data == "rsch_cancel":
+        await state.clear(); await cb.message.edit_text("Отменено."); await cb.answer(); return
+
+    old_session_id = cb.data.replace("rsch_","")
+    data = await state.get_data()
+    lang = data.get("lang","ru")
+
+    # Находим выбранное занятие
+    sessions = db.get_sessions_for_student(data["student_id"])
+    old_session = next((s for s in sessions if s["id"] == old_session_id), None)
+    if not old_session:
+        await cb.answer("Занятие не найдено", show_alert=True); return
+
+    days_ru = ["Пн","Вт","Ср","Чт","Пт","Сб","Вс"]
+    d = date.fromisoformat(old_session["date"])
+    dow = days_ru[d.weekday()]
+    old_info = f"{dow}, {fmt_date(d)}" + (f" {old_session['time']}" if old_session.get("time") else "")
+
+    await state.update_data(old_session_id=old_session_id, old_info=old_info)
+
+    # Показываем доступные даты для переноса
+    available = get_available_dates()
+    if not available:
+        await cb.message.edit_text(
+            "😔 Нет доступных дат для переноса." if lang=="ru" else "😔 No available dates for rescheduling."
+        )
+        await state.clear(); await cb.answer(); return
+
+    buttons = []
+    for avail_date, slots in available[:14]:
+        dow_new = days_ru[avail_date.weekday()]
+        label = f"{dow_new} {fmt_date(avail_date)} — {len(slots)} окн{'о' if len(slots)==1 else 'а' if len(slots)<5 else 'ов'}"
+        buttons.append([InlineKeyboardButton(text=label, callback_data=f"rschdate_{avail_date.isoformat()}")])
+    buttons.append([InlineKeyboardButton(text="❌ Отмена" if lang=="ru" else "❌ Cancel",
+                                         callback_data="rsch_cancel2")])
+
+    await cb.message.edit_text(
+        f"🔄 Перенос занятия: <b>{old_info}</b>\n\n📅 Выберите новую дату:" if lang=="ru"
+        else f"🔄 Reschedule: <b>{old_info}</b>\n\n📅 Choose new date:",
+        parse_mode="HTML",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons)
+    )
+    await state.set_state(RescheduleLesson.date_select)
+    await cb.answer()
+
+@dp.callback_query(RescheduleLesson.date_select, F.data == "rsch_cancel2")
+async def rsch_cancel2(cb: CallbackQuery, state: FSMContext):
+    await state.clear(); await cb.message.edit_text("Отменено."); await cb.answer()
+
+@dp.callback_query(RescheduleLesson.date_select, F.data.startswith("rschdate_"))
+async def rsch_date_selected(cb: CallbackQuery, state: FSMContext):
+    new_date_str = cb.data.replace("rschdate_","")
+    new_date = date.fromisoformat(new_date_str)
+    data = await state.get_data()
+    lang = data.get("lang","ru")
+
+    slots = get_free_slots(new_date)
+    if not slots:
+        next_avail = find_next_available(new_date)
+        if next_avail:
+            nd, ns = next_avail
+            days_ru = ["Пн","Вт","Ср","Чт","Пт","Сб","Вс"]
+            await cb.answer(
+                f"На {fmt_date(new_date)} нет окон. Попробуй {days_ru[nd.weekday()]} {fmt_date(nd)}",
+                show_alert=True)
+        else:
+            await cb.answer("Нет свободных дат.", show_alert=True)
+        return
+
+    await state.update_data(new_date=new_date_str)
+    days_ru = ["Пн","Вт","Ср","Чт","Пт","Сб","Вс"]
+    dow = days_ru[new_date.weekday()]
+
+    buttons = []
+    row = []
+    for slot in slots:
+        row.append(InlineKeyboardButton(text=f"⏰ {slot}", callback_data=f"rschtime_{slot}"))
+        if len(row) == 3:
+            buttons.append(row); row = []
+    if row: buttons.append(row)
+    buttons.append([InlineKeyboardButton(text="🔙 Другая дата", callback_data="rsch_back_dates")])
+
+    await cb.message.edit_text(
+        f"📅 <b>{dow}, {fmt_date(new_date)}</b>\n\nВыберите новое время:" if lang=="ru"
+        else f"📅 <b>{new_date.strftime('%A')}, {fmt_date(new_date)}</b>\n\nChoose new time:",
+        parse_mode="HTML",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons)
+    )
+    await state.set_state(RescheduleLesson.time_select)
+    await cb.answer()
+
+@dp.callback_query(RescheduleLesson.time_select, F.data == "rsch_back_dates")
+async def rsch_back_dates(cb: CallbackQuery, state: FSMContext):
+    data = await state.get_data()
+    lang = data.get("lang","ru")
+    available = get_available_dates()
+    days_ru = ["Пн","Вт","Ср","Чт","Пт","Сб","Вс"]
+    buttons = []
+    for avail_date, slots in available[:14]:
+        dow_new = days_ru[avail_date.weekday()]
+        label = f"{dow_new} {fmt_date(avail_date)} — {len(slots)} окн{'о' if len(slots)==1 else 'а' if len(slots)<5 else 'ов'}"
+        buttons.append([InlineKeyboardButton(text=label, callback_data=f"rschdate_{avail_date.isoformat()}")])
+    buttons.append([InlineKeyboardButton(text="❌ Отмена", callback_data="rsch_cancel2")])
+    old_info = data.get("old_info","")
+    await cb.message.edit_text(
+        f"🔄 Перенос: <b>{old_info}</b>\n\n📅 Выберите дату:" if lang=="ru"
+        else f"🔄 Reschedule: <b>{old_info}</b>\n\n📅 Choose date:",
+        parse_mode="HTML",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons)
+    )
+    await state.set_state(RescheduleLesson.date_select)
+    await cb.answer()
+
+@dp.callback_query(RescheduleLesson.time_select, F.data.startswith("rschtime_"))
+async def rsch_time_selected(cb: CallbackQuery, state: FSMContext):
+    new_time = cb.data.replace("rschtime_","")
+    data = await state.get_data()
+    lang = data.get("lang","ru")
+    new_date = date.fromisoformat(data["new_date"])
+
+    # Проверка доступности
+    slots = get_free_slots(new_date)
+    if new_time not in slots:
+        await cb.answer("Это время уже занято." if lang=="ru" else "This slot is taken.", show_alert=True)
+        return
+
+    await state.update_data(new_time=new_time)
+    days_ru = ["Пн","Вт","Ср","Чт","Пт","Сб","Вс"]
+    dow = days_ru[new_date.weekday()]
+    new_info = f"{dow}, {fmt_date(new_date)} {new_time}"
+    old_info = data.get("old_info","")
+
+    await cb.message.edit_text(
+        f"🔄 <b>Подтвердите перенос:</b>\n\n"
+        f"❌ Было: {old_info}\n"
+        f"✅ Станет: {new_info}\n\n"
+        f"Запрос будет отправлен преподавателю." if lang=="ru" else
+        f"🔄 <b>Confirm reschedule:</b>\n\n"
+        f"❌ Was: {old_info}\n"
+        f"✅ New: {new_info}\n\n"
+        f"Request will be sent to the teacher.",
+        parse_mode="HTML",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="✅ Подтвердить" if lang=="ru" else "✅ Confirm",
+                                  callback_data="rsch_confirm")],
+            [InlineKeyboardButton(text="❌ Отмена" if lang=="ru" else "❌ Cancel",
+                                  callback_data="rsch_cancel2")],
+        ])
+    )
+    await state.set_state(RescheduleLesson.confirm)
+    await cb.answer()
+
+@dp.callback_query(RescheduleLesson.confirm, F.data == "rsch_confirm")
+async def rsch_confirmed(cb: CallbackQuery, state: FSMContext):
+    data = await state.get_data()
+    lang = data.get("lang","ru")
+    old_session_id = data["old_session_id"]
+    student_id     = data["student_id"]
+    student_name   = data["student_name"]
+    new_date_str   = data["new_date"]
+    new_time       = data["new_time"]
+    old_info       = data.get("old_info","")
+
+    # Финальная проверка
+    slots = get_free_slots(date.fromisoformat(new_date_str))
+    if new_time not in slots:
+        await cb.answer("Время уже занято. Выберите другое." if lang=="ru"
+                        else "Time slot taken. Choose another.", show_alert=True)
+        await state.clear(); return
+
+    # Атомарный перенос через RPC
+    new_session_id = str(uuid.uuid4())
+    result = db.reschedule_lesson_atomic(
+        old_session_id=old_session_id,
+        new_session_id=new_session_id,
+        student_id=student_id,
+        new_date=new_date_str,
+        new_time=new_time,
+        reason="Перенос по запросу ученика"
+    )
+    log.info(f"reschedule_atomic result: {result}")
+
+    days_ru = ["Пн","Вт","Ср","Чт","Пт","Сб","Вс"]
+    nd = date.fromisoformat(new_date_str)
+    new_info = f"{days_ru[nd.weekday()]}, {fmt_date(nd)} {new_time}"
+
+    if not result.get("ok"):
+        reason = result.get("reason","")
+        if reason == "time_conflict":
+            await cb.answer("Время уже занято другим учеником!" if lang=="ru"
+                            else "Time slot taken by another student!", show_alert=True)
+        else:
+            # Fallback: прямая запись
+            try:
+                db._patch_session_status(old_session_id, "rescheduled")
+                db.add_session_direct({
+                    "id": new_session_id, "student_id": student_id,
+                    "date": new_date_str, "time": new_time,
+                    "held": False, "paid": False, "status": "scheduled",
+                    "rescheduled_from": old_session_id,
+                })
+                result = {"ok": True}
+            except Exception as e:
+                log.error(f"reschedule fallback failed: {e}")
+                await cb.answer("Ошибка переноса", show_alert=True)
+                await state.clear(); return
+
+    if result.get("ok"):
+        await cb.message.edit_text(
+            f"✅ Запрос на перенос отправлен!\n\n❌ Было: {old_info}\n✅ Станет: {new_info}" if lang=="ru"
+            else f"✅ Reschedule request sent!\n\n❌ Was: {old_info}\n✅ New: {new_info}"
+        )
+        # Уведомляем преподавателя
+        await bot.send_message(
+            TUTOR_ID,
+            f"🔄 <b>Запрос на перенос занятия</b>\n\n"
+            f"👤 {student_name}\n"
+            f"❌ Было: {old_info}\n"
+            f"✅ Новое: {new_info}",
+            parse_mode="HTML"
+        )
+
+    await state.clear()
+    await cb.answer()
+
+
 # ── Команды преподавателя ─────────────────────────────────────────────────────
 
 @dp.message(F.text == "📋 Заявки")
@@ -1568,6 +1870,411 @@ async def do_cancel_app(cb: CallbackQuery):
     except Exception: pass
     await cb.message.edit_text("✅ Заявка отменена.")
     await cb.answer()
+
+
+# ── Перенос занятия ───────────────────────────────────────────────────────────
+
+@dp.message(F.text.in_({"🔄 Перенести занятие", "🔄 Reschedule lesson"}))
+@dp.message(Command("reschedule"))
+async def cmd_reschedule(msg: Message, state: FSMContext):
+    student = db.get_student_by_telegram(msg.from_user.id)
+    if not student:
+        await msg.answer("Вы ещё не зарегистрированы."); return
+    lang = student.get("telegram_lang", "ru")
+
+    # Получаем будущие активные занятия
+    try:
+        sessions = db.get_active_sessions_for_student(student["id"])
+    except Exception:
+        sessions = db.get_sessions_for_student(student["id"])
+
+    today_str = today_seoul().isoformat()
+    upcoming = sorted([s for s in sessions if s["date"] >= today_str and not s.get("held")],
+                      key=lambda s: s["date"])
+
+    if not upcoming:
+        await msg.answer("У вас нет предстоящих занятий для переноса." if lang=="ru"
+                         else "You have no upcoming lessons to reschedule."); return
+
+    days_ru = ["Пн","Вт","Ср","Чт","Пт","Сб","Вс"]
+    buttons = []
+    for s in upcoming[:5]:
+        d = date.fromisoformat(s["date"])
+        dow = days_ru[d.weekday()]
+        time_str = f" {s['time']}" if s.get("time") else ""
+        label = f"📅 {dow}, {fmt_date(d)}{time_str}"
+        buttons.append([InlineKeyboardButton(text=label, callback_data=f"rsch_{s['id']}")])
+    buttons.append([InlineKeyboardButton(text="❌ Отмена" if lang=="ru" else "❌ Cancel",
+                                         callback_data="rsch_cancel")])
+
+    await state.update_data(student_id=student["id"], lang=lang)
+    text = "🔄 <b>Выберите занятие для переноса:</b>" if lang=="ru" else "🔄 <b>Select lesson to reschedule:</b>"
+    await msg.answer(text, parse_mode="HTML", reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons))
+    await state.set_state(RescheduleLesson.select_session)
+
+@dp.callback_query(RescheduleLesson.select_session, F.data.startswith("rsch_"))
+async def rsch_session_selected(cb: CallbackQuery, state: FSMContext):
+    if cb.data == "rsch_cancel":
+        await state.clear(); await cb.message.edit_text("Отменено."); await cb.answer(); return
+
+    session_id = cb.data.replace("rsch_", "")
+    data = await state.get_data()
+    lang = data.get("lang", "ru")
+
+    # Находим занятие
+    try:
+        all_sessions = db.get_active_sessions_for_student(data["student_id"])
+    except Exception:
+        all_sessions = db.get_sessions_for_student(data["student_id"])
+    session = next((s for s in all_sessions if s["id"] == session_id), None)
+    if not session:
+        await cb.answer("Занятие не найдено", show_alert=True); return
+
+    await state.update_data(old_session_id=session_id, old_session=session)
+
+    # Показываем доступные даты
+    available = get_available_dates()
+    if not available:
+        await cb.message.edit_text("К сожалению, нет доступных дат для переноса." if lang=="ru"
+                                   else "No available dates for rescheduling."); await cb.answer(); return
+
+    days_ru = ["Пн","Вт","Ср","Чт","Пт","Сб","Вс"]
+    old_d = date.fromisoformat(session["date"])
+    old_str = f"{days_ru[old_d.weekday()]}, {fmt_date(old_d)}"
+    time_str = f" {session['time']}" if session.get("time") else ""
+
+    buttons = []
+    for d, slots in available[:14]:
+        if d == old_d: continue  # не показываем ту же дату
+        dow = days_ru[d.weekday()]
+        label = f"{dow} {fmt_date(d)} — {len(slots)} окн{'о' if len(slots)==1 else 'а' if len(slots)<5 else 'ов'}"
+        buttons.append([InlineKeyboardButton(text=label, callback_data=f"rschdate_{d.isoformat()}")])
+    buttons.append([InlineKeyboardButton(text="❌ Отмена" if lang=="ru" else "❌ Cancel",
+                                         callback_data="rsch_cancel")])
+
+    text = (f"🔄 Перенос занятия: <b>{old_info}</b>\n\n📅 Выберите дату:"
+            if lang=="ru" else
+            f"🔄 Reschedule: <b>{old_info}</b>\n\n📅 Choose date:")
+
+    await cb.message.edit_text(text, parse_mode="HTML", reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons))
+    await state.set_state(RescheduleLesson.date_select)
+    await cb.answer()
+
+@dp.callback_query(RescheduleLesson.date_select, F.data.startswith("rschdate_"))
+async def rsch_date_selected(cb: CallbackQuery, state: FSMContext):
+    date_str = cb.data.replace("rschdate_", "")
+    selected_date = date.fromisoformat(date_str)
+    data = await state.get_data()
+    lang = data.get("lang", "ru")
+
+    slots = get_free_slots(selected_date)
+    if not slots:
+        next_avail = find_next_available(selected_date)
+        if lang == "ru":
+            if next_avail:
+                text = f"На {fmt_date(selected_date)} нет свободного времени.\nБлижайшая дата: {fmt_date(next_avail[0])}"
+            else:
+                text = "Нет доступных дат."
+        else:
+            if next_avail:
+                text = f"No slots on {fmt_date(selected_date)}.\nNext available: {fmt_date(next_avail[0])}"
+            else:
+                text = "No dates available."
+        await cb.answer(text, show_alert=True); return
+
+    await state.update_data(new_date=date_str)
+    days_ru = ["Пн","Вт","Ср","Чт","Пт","Сб","Вс"]
+    dow = days_ru[selected_date.weekday()]
+
+    buttons = []
+    row = []
+    for slot in slots:
+        row.append(InlineKeyboardButton(text=f"⏰ {slot}", callback_data=f"rschtime_{slot}"))
+        if len(row) == 3: buttons.append(row); row = []
+    if row: buttons.append(row)
+    buttons.append([InlineKeyboardButton(text="🔙 Другая дата" if lang=="ru" else "🔙 Other date",
+                                         callback_data="rsch_back_date")])
+
+    text = (f"📅 <b>{dow}, {fmt_date(selected_date)}</b>\n\nВыберите новое время:" if lang=="ru" else f"📅 <b>{selected_date.strftime('%A')}, {fmt_date(selected_date)}</b>\n\nChoose time:")
+    await cb.message.edit_text(text, parse_mode="HTML", reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons))
+    await state.set_state(RescheduleLesson.time_select)
+    await cb.answer()
+
+@dp.callback_query(RescheduleLesson.time_select, F.data.startswith("rschtime_"))
+async def rsch_time_selected(cb: CallbackQuery, state: FSMContext):
+    new_time = cb.data.replace("rschtime_", "")
+    data = await state.get_data()
+    lang = data.get("lang", "ru")
+    new_date = date.fromisoformat(data["new_date"])
+    old_s = data.get("old_session", {})
+
+    # Повторная проверка
+    slots = get_free_slots(new_date)
+    if new_time not in slots:
+        await cb.answer("Время уже занято." if lang=="ru" else "This time is no longer available.", show_alert=True)
+        return
+
+    await state.update_data(new_time=new_time)
+    days_ru = ["Пн","Вт","Ср","Чт","Пт","Сб","Вс"]
+    old_d = date.fromisoformat(old_s.get("date",""))
+    old_fmt = f"{days_ru[old_d.weekday()]}, {fmt_date(old_d)} {old_s.get('time','')}"
+    new_fmt = f"{days_ru[new_date.weekday()]}, {fmt_date(new_date)} {new_time}"
+
+    text = (
+        f"\U0001F504 <b>\u041f\u043e\u0434\u0442\u0432\u0435\u0440\u0434\u0438\u0442\u0435 \u043f\u0435\u0440\u0435\u043d\u043e\u0441:</b>\n\n\u0421\u0442\u0430\u0440\u043e\u0435: {old_fmt}\n\u041d\u043e\u0432\u043e\u0435: <b>{new_fmt}</b>\n\n\u0417\u0430\u043f\u0440\u043e\u0441 \u043e\u0442\u043f\u0440\u0430\u0432\u043b\u0435\u043d \u043f\u0440\u0435\u043f\u043e\u0434\u0430\u0432\u0430\u0442\u0435\u043b\u044e."
+        if lang == "ru" else
+        f"\U0001F504 <b>Confirm reschedule:</b>\n\nWas: {old_fmt}\nNew: <b>{new_fmt}</b>\n\nRequest will be sent to the teacher."
+    )
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="✅ Подтвердить" if lang=="ru" else "✅ Confirm",
+                              callback_data="rsch_confirm")],
+        [InlineKeyboardButton(text="❌ Отмена" if lang=="ru" else "❌ Cancel",
+                              callback_data="rsch_cancel")],
+    ])
+    await cb.message.edit_text(text, parse_mode="HTML", reply_markup=kb)
+    await state.set_state(RescheduleLesson.confirm)
+    await cb.answer()
+
+@dp.callback_query(RescheduleLesson.confirm, F.data == "rsch_confirm")
+async def rsch_confirm(cb: CallbackQuery, state: FSMContext):
+    data = await state.get_data()
+    lang = data.get("lang", "ru")
+    old_session_id = data["old_session_id"]
+    old_s = data.get("old_session", {})
+    new_date = data["new_date"]
+    new_time = data["new_time"]
+    student_id = data["student_id"]
+
+    # Финальная проверка
+    slots = get_free_slots(date.fromisoformat(new_date))
+    if new_time not in slots:
+        await cb.answer("Время уже занято. Выберите другое." if lang=="ru"
+                        else "Time no longer available.", show_alert=True)
+        await state.clear(); return
+
+    # Уведомляем преподавателя — он должен подтвердить перенос
+    days_ru = ["Пн","Вт","Ср","Чт","Пт","Сб","Вс"]
+    old_d = date.fromisoformat(old_s.get("date",""))
+    old_fmt = f"{days_ru[old_d.weekday()]}, {fmt_date(old_d)} {old_s.get('time','')}"
+    new_d = date.fromisoformat(new_date)
+    new_fmt = f"{days_ru[new_d.weekday()]}, {fmt_date(new_d)} {new_time}"
+
+    # Получаем имя ученика
+    all_students = db.get_all_students()
+    student = next((s for s in all_students if s["id"] == student_id), None)
+    student_name = student["name"] if student else "Ученик"
+
+    new_session_id = str(uuid.uuid4())
+    notif_id = new_session_id.replace("-","")
+
+    # Сохраняем данные переноса во временную заявку
+    db.create_application({
+        "telegram_id":    cb.from_user.id,
+        "name":           student_name,
+        "level":          old_session_id,      # старое занятие
+        "frequency":      new_time,
+        "preferred_time": f"{new_date} {new_time}",
+        "message":        f"{student_id}|{new_session_id}",  # student_id|new_session_id
+        "lang":           lang,
+        "status":         "new",
+        "username":       "reschedule",  # маркер переноса
+    })
+
+    await cb.message.edit_text(
+        (f"\u2705 \u0417\u0430\u043f\u0440\u043e\u0441 \u043e\u0442\u043f\u0440\u0430\u0432\u043b\u0435\u043d!\n\n{old_fmt} \u2192 {new_fmt}\n\n\u041e\u0436\u0438\u0434\u0430\u0439\u0442\u0435 \u043f\u043e\u0434\u0442\u0432\u0435\u0440\u0436\u0434\u0435\u043d\u0438\u044f."
+        if lang == "ru" else
+        f"\u2705 Reschedule request sent!\n\n{old_fmt} \u2192 {new_fmt}\n\nWaiting for confirmation.")
+    )
+
+    kb = InlineKeyboardMarkup(inline_keyboard=[[
+        InlineKeyboardButton(text=f"✅ Перенести — {student_name}",
+                             callback_data=f"apv_rsch_{notif_id}"),
+        InlineKeyboardButton(text="❌ Отклонить", callback_data=f"rej_rsch_{notif_id}"),
+    ]])
+    await bot.send_message(
+        TUTOR_ID,
+        f"🔄 <b>Запрос на перенос!</b>\n\n"
+        f"👤 {student_name}\n"
+        f"Было: {old_fmt}\n"
+        f"Хочет: <b>{new_fmt}</b>",
+        parse_mode="HTML", reply_markup=kb
+    )
+    await state.clear(); await cb.answer()
+
+@dp.callback_query(F.data.startswith("apv_rsch_"))
+async def approve_reschedule(cb: CallbackQuery):
+    if cb.from_user.id != TUTOR_ID:
+        await cb.answer("Нет доступа", show_alert=True); return
+
+    notif_id = cb.data.replace("apv_rsch_", "")
+    # Ищем заявку по маркеру "reschedule"
+    all_apps = db.get_new_applications()
+    app = next((a for a in all_apps if a.get("username") == "reschedule"
+                and a["id"].replace("-","")[:12] == notif_id[:12]), None)
+    if not app:
+        await cb.answer("Заявка не найдена", show_alert=True); return
+
+    msg_parts = app.get("message","").split("|")
+    student_id    = msg_parts[0] if msg_parts else ""
+    new_session_id= msg_parts[1] if len(msg_parts) > 1 else str(uuid.uuid4())
+    old_session_id= app.get("level","")
+    new_date_time = app.get("preferred_time","").split()
+    new_date = new_date_time[0] if new_date_time else ""
+    new_time = new_date_time[1] if len(new_date_time) > 1 else ""
+
+    # Атомарный перенос
+    result = db.reschedule_lesson_atomic(
+        old_session_id=old_session_id, new_session_id=new_session_id,
+        student_id=student_id, new_date=new_date, new_time=new_time,
+    )
+
+    days_ru = ["Пн","Вт","Ср","Чт","Пт","Сб","Вс"]
+    try:
+        nd = date.fromisoformat(new_date)
+        new_fmt = f"{days_ru[nd.weekday()]}, {fmt_date(nd)} {new_time}"
+    except Exception:
+        new_fmt = f"{new_date} {new_time}"
+
+    if result.get("ok"):
+        db.update_application(app["id"], "approved")
+        await cb.message.edit_text(
+            f"✅ <b>Перенос подтверждён!</b>\n\n👤 {app['name']}\n📅 {new_fmt}",
+            parse_mode="HTML"
+        )
+        lang = app.get("lang","ru")
+        try:
+            await bot.send_message(app["telegram_id"],
+                f"✅ Перенос подтверждён!\n\n📅 {new_fmt}\n\nДо встречи! 💪"
+                if lang=="ru" else
+                f"✅ Reschedule confirmed!\n\n📅 {new_fmt}\n\nSee you! 💪")
+        except Exception: pass
+    else:
+        reason = result.get("reason","")
+        db.update_application(app["id"], "rejected")
+        err = "Конфликт времени — слот уже занят." if reason=="time_conflict" else f"Ошибка: {reason}"
+        await cb.message.edit_text(f"❌ Перенос не выполнен. {err}")
+        try:
+            await bot.send_message(app["telegram_id"],
+                f"😔 Перенос не удался: {err}" if app.get("lang","ru")=="ru"
+                else f"😔 Reschedule failed: {err}")
+        except Exception: pass
+
+    await cb.answer()
+
+@dp.callback_query(F.data.startswith("rej_rsch_"))
+async def reject_reschedule(cb: CallbackQuery):
+    if cb.from_user.id != TUTOR_ID:
+        await cb.answer("Нет доступа", show_alert=True); return
+    notif_id = cb.data.replace("rej_rsch_", "")
+    all_apps = db.get_new_applications()
+    app = next((a for a in all_apps if a.get("username") == "reschedule"
+                and a["id"].replace("-","")[:12] == notif_id[:12]), None)
+    if not app:
+        await cb.answer("Заявка не найдена", show_alert=True); return
+    db.update_application(app["id"], "rejected")
+    await cb.message.edit_text(f"❌ Перенос отклонён.")
+    lang = app.get("lang","ru")
+    try:
+        await bot.send_message(app["telegram_id"],
+            "😔 К сожалению, перенос был отклонён преподавателем." if lang=="ru"
+            else "😔 Unfortunately, the reschedule was declined.")
+    except Exception: pass
+    await cb.answer()
+
+@dp.callback_query(F.data == "rsch_cancel")
+async def rsch_cancel(cb: CallbackQuery, state: FSMContext):
+    await state.clear()
+    await cb.message.edit_text("Отменено.")
+    await cb.answer()
+
+@dp.callback_query(F.data == "rsch_back_date")
+async def rsch_back_date(cb: CallbackQuery, state: FSMContext):
+    data = await state.get_data()
+    lang = data.get("lang","ru")
+    available = get_available_dates()
+    days_ru = ["Пн","Вт","Ср","Чт","Пт","Сб","Вс"]
+    old_d = date.fromisoformat(data.get("old_session",{}).get("date",""))
+    buttons = []
+    for d, slots in available[:14]:
+        if d == old_d: continue
+        dow = days_ru[d.weekday()]
+        buttons.append([InlineKeyboardButton(
+            text=f"{dow} {fmt_date(d)} — {len(slots)} окн{'о' if len(slots)==1 else 'а' if len(slots)<5 else 'ов'}",
+            callback_data=f"rschdate_{d.isoformat()}")])
+    buttons.append([InlineKeyboardButton(text="❌ Отмена", callback_data="rsch_cancel")])
+    await cb.message.edit_text("📅 Выберите новую дату:", reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons))
+    await state.set_state(RescheduleLesson.date_select)
+    await cb.answer()
+
+# ── Отмена занятия преподавателем ─────────────────────────────────────────────
+
+@dp.message(Command("cancel_session"))
+async def cmd_cancel_session(msg: Message):
+    if msg.from_user.id != TUTOR_ID: return
+    students = db.get_all_students()
+    buttons = [[InlineKeyboardButton(text=f"👤 {s['name']}", callback_data=f"csess_{s['id']}")]
+               for s in students]
+    buttons.append([InlineKeyboardButton(text="❌ Закрыть", callback_data="csess_close")])
+    await msg.answer("🚫 <b>Отменить занятие — выбери ученика:</b>",
+                     parse_mode="HTML", reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons))
+
+@dp.callback_query(F.data.startswith("csess_"))
+async def cancel_session_student(cb: CallbackQuery):
+    if cb.from_user.id != TUTOR_ID: return
+    if cb.data == "csess_close":
+        await cb.message.edit_text("Закрыто."); await cb.answer(); return
+    student_id = cb.data.replace("csess_", "")
+    today_str = today_seoul().isoformat()
+    try:
+        sessions = db.get_active_sessions_for_student(student_id)
+    except Exception:
+        sessions = db.get_sessions_for_student(student_id)
+    upcoming = sorted([s for s in sessions if s["date"] >= today_str], key=lambda s: s["date"])
+    if not upcoming:
+        await cb.answer("Нет предстоящих занятий", show_alert=True); return
+    all_students = db.get_all_students()
+    student = next((s for s in all_students if s["id"] == student_id), None)
+    days_ru = ["Пн","Вт","Ср","Чт","Пт","Сб","Вс"]
+    buttons = []
+    for s in upcoming[:5]:
+        d = date.fromisoformat(s["date"])
+        label = f"📅 {days_ru[d.weekday()]}, {fmt_date(d)} {s.get('time','')}"
+        buttons.append([InlineKeyboardButton(text=label, callback_data=f"dosess_{s['id']}")])
+    buttons.append([InlineKeyboardButton(text="❌ Закрыть", callback_data="csess_close")])
+    await cb.message.edit_text(
+        f"🚫 Отменить занятие — {student['name'] if student else ''}:",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons))
+    await cb.answer()
+
+@dp.callback_query(F.data.startswith("dosess_"))
+async def do_cancel_session(cb: CallbackQuery):
+    if cb.from_user.id != TUTOR_ID: return
+    session_id = cb.data.replace("dosess_", "")
+    result = db.cancel_lesson_atomic(session_id, reason="cancelled_by_tutor")
+    if result.get("ok"):
+        # Находим занятие чтобы уведомить ученика
+        all_students = db.get_all_students()
+        try:
+            sessions_today = db.get_all_sessions_raw()
+            s = next((x for x in sessions_today if x["id"] == session_id), None)
+            if s:
+                student = next((st for st in all_students if st["id"] == s["student_id"]), None)
+                if student and student.get("telegram_id"):
+                    lang = student.get("telegram_lang","ru")
+                    d = date.fromisoformat(s["date"])
+                    days_ru = ["Пн","Вт","Ср","Чт","Пт","Сб","Вс"]
+                    date_fmt = f"{days_ru[d.weekday()]}, {fmt_date(d)}"
+                    await bot.send_message(student["telegram_id"],
+                        f"😔 Занятие {date_fmt} {s.get('time','')} было отменено преподавателем.\nС вами свяжутся для согласования нового времени."
+                        if lang=="ru" else
+                        f"😔 Lesson on {date_fmt} {s.get('time','')} was cancelled by the teacher.\nYou will be contacted to arrange a new time.")
+        except Exception as e:
+            log.warning(f"cancel session notify error: {e}")
+        await cb.message.edit_text("✅ Занятие отменено. Ученик уведомлён.")
+    else:
+        await cb.message.edit_text(f"❌ Не удалось отменить: {result.get('reason','')}")
+    await cb.answer()
+
 
 # ── Генерация занятий ─────────────────────────────────────────────────────────
 
