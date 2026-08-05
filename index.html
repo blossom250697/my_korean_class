@@ -714,27 +714,73 @@ function ReportsPage() {
   const prev=()=>{if(month===1){setMonth(12);setYear(y=>y-1);}else setMonth(m=>m-1);};
   const next=()=>{if(month===12){setMonth(1);setYear(y=>y+1);}else setMonth(m=>m+1);};
   const active=students.filter(s=>sessions.some(ses=>{if(ses.student_id!==s.id)return false;const d=new Date(ses.date);return d.getFullYear()===year&&d.getMonth()+1===month;}));
+  // Платежи из таблицы payments за выбранный месяц
+  const monthPaymentsSum = (studentId) => {
+    return (studentPayments||[]).filter(p=>{
+      if(p.student_id!==studentId) return false;
+      const d=new Date(p.paid_at||p.created_at||'');
+      return d.getFullYear()===year && d.getMonth()+1===month;
+    }).reduce((s,p)=>s+(+p.amount),0);
+  };
+  const totalStudentPayments = (studentId) =>
+    (studentPayments||[]).filter(p=>p.student_id===studentId).reduce((s,p)=>s+(+p.amount),0);
+
   const paid=[],unpaid=[];
   active.forEach(s=>{
     let ok=false;
-    if(s.payment_type==='monthly'){const p=payments.find(p=>p.student_id===s.id&&p.year===year&&p.month===month);ok=p?.paid||false;}
-    else{const myS=sessions.filter(x=>x.student_id===s.id);const allHeld=myS.filter(x=>x.held).sort((a,b)=>a.date.localeCompare(b.date));const fc=s.has_free?(s.free_count||0):0;const mS=myS.filter(x=>{const d=new Date(x.date);return d.getFullYear()===year&&d.getMonth()+1===month&&x.held;});const paidable=mS.filter(x=>allHeld.findIndex(y=>y.id===x.id)+1>fc);ok=paidable.length>0&&paidable.every(x=>x.paid);}
+    if(s.payment_type==='monthly'){
+      const p=payments.find(p=>p.student_id===s.id&&p.year===year&&p.month===month);
+      ok=p?.paid||false;
+      // Также считаем оплаченным если внесена полная сумма через payments
+      if(!ok){const mp=monthPaymentsSum(s.id);ok=mp>=MONTHLY_RATES[s.frequency];}
+    } else {
+      const myS=sessions.filter(x=>x.student_id===s.id);
+      const allHeld=myS.filter(x=>x.held).sort((a,b)=>a.date.localeCompare(b.date));
+      const fc=s.has_free?(s.free_count||0):0;
+      const mS=myS.filter(x=>{const d=new Date(x.date);return d.getFullYear()===year&&d.getMonth()+1===month&&x.held;});
+      const paidable=mS.filter(x=>allHeld.findIndex(y=>y.id===x.id)+1>fc);
+      const paidViaSessions=paidable.length>0&&paidable.every(x=>x.paid);
+      // Считаем оплаченным если сумма платежей >= сумма за занятия в месяце
+      const monthDebt=paidable.length*sRate(s.frequency);
+      const paidViaPayments=totalStudentPayments(s.id)>=monthDebt&&monthDebt>0;
+      ok=paidViaSessions||paidViaPayments;
+    }
     (ok?paid:unpaid).push(s);
   });
+
   const expected=active.reduce((s,x)=>s+MONTHLY_RATES[x.frequency],0);
+
+  // Получено за месяц = платежи из sessions.paid + из таблицы payments за этот месяц
   const actualMonth=active.reduce((sum,s)=>{
-    if(s.payment_type==='monthly'){const p=payments.find(p=>p.student_id===s.id&&p.year===year&&p.month===month);return sum+(p?.paid?MONTHLY_RATES[s.frequency]:0);}
-    const myS=sessions.filter(x=>x.student_id===s.id);const allHeld=myS.filter(x=>x.held).sort((a,b)=>a.date.localeCompare(b.date));const fc=s.has_free?(s.free_count||0):0;
+    if(s.payment_type==='monthly'){
+      const p=payments.find(p=>p.student_id===s.id&&p.year===year&&p.month===month);
+      const viaMonthly=p?.paid?MONTHLY_RATES[s.frequency]:0;
+      const viaPayments=monthPaymentsSum(s.id);
+      return sum+Math.max(viaMonthly,viaPayments);
+    }
+    const myS=sessions.filter(x=>x.student_id===s.id);
+    const allHeld=myS.filter(x=>x.held).sort((a,b)=>a.date.localeCompare(b.date));
+    const fc=s.has_free?(s.free_count||0):0;
     const paidS=myS.filter(x=>{const d=new Date(x.date);return d.getFullYear()===year&&d.getMonth()+1===month&&x.held&&x.paid&&allHeld.findIndex(y=>y.id===x.id)+1>fc;});
-    return sum+paidS.length*sRate(s.frequency);
+    const viaSession=paidS.length*sRate(s.frequency);
+    const viaPayments=monthPaymentsSum(s.id);
+    return sum+Math.max(viaSession,viaPayments);
   },0);
+
   const totalDebt=students.reduce((s,x)=>s+calcDebt(x,sessions,payments,studentPayments).debtAmount,0);
+
+  // За всё время = платежи из sessions + из таблицы payments
   const allTime=students.reduce((sum,s)=>{
     const myS=sessions.filter(x=>x.student_id===s.id);
-    if(s.payment_type==='monthly'){const pM=payments.filter(p=>p.student_id===s.id&&p.paid).length;return sum+pM*MONTHLY_RATES[s.frequency];}
-    const allHeld=myS.filter(x=>x.held).sort((a,b)=>a.date.localeCompare(b.date));const fc=s.has_free?(s.free_count||0):0;
+    const spTotal=totalStudentPayments(s.id);
+    if(s.payment_type==='monthly'){
+      const pM=payments.filter(p=>p.student_id===s.id&&p.paid).length;
+      return sum+Math.max(pM*MONTHLY_RATES[s.frequency], spTotal);
+    }
+    const allHeld=myS.filter(x=>x.held).sort((a,b)=>a.date.localeCompare(b.date));
+    const fc=s.has_free?(s.free_count||0):0;
     const pC=myS.filter(x=>x.held&&x.paid&&allHeld.findIndex(y=>y.id===x.id)+1>fc).length;
-    return sum+pC*sRate(s.frequency);
+    return sum+Math.max(pC*sRate(s.frequency), spTotal);
   },0);
   const debtors=students.map(s=>({student:s,...calcDebt(s,sessions,payments,studentPayments)})).filter(d=>d.debtAmount>0);
   return (
