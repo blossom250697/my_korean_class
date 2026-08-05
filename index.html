@@ -727,25 +727,9 @@ function ReportsPage() {
 
   const paid=[],unpaid=[];
   active.forEach(s=>{
-    let ok=false;
-    if(s.payment_type==='monthly'){
-      const p=payments.find(p=>p.student_id===s.id&&p.year===year&&p.month===month);
-      ok=p?.paid||false;
-      // Также считаем оплаченным если внесена полная сумма через payments
-      if(!ok){const mp=monthPaymentsSum(s.id);ok=mp>=MONTHLY_RATES[s.frequency];}
-    } else {
-      const myS=sessions.filter(x=>x.student_id===s.id);
-      const allHeld=myS.filter(x=>x.held).sort((a,b)=>a.date.localeCompare(b.date));
-      const fc=s.has_free?(s.free_count||0):0;
-      const mS=myS.filter(x=>{const d=new Date(x.date);return d.getFullYear()===year&&d.getMonth()+1===month&&x.held;});
-      const paidable=mS.filter(x=>allHeld.findIndex(y=>y.id===x.id)+1>fc);
-      const paidViaSessions=paidable.length>0&&paidable.every(x=>x.paid);
-      // Считаем оплаченным если сумма платежей >= сумма за занятия в месяце
-      const monthDebt=paidable.length*sRate(s.frequency);
-      const paidViaPayments=totalStudentPayments(s.id)>=monthDebt&&monthDebt>0;
-      ok=paidViaSessions||paidViaPayments;
-    }
-    (ok?paid:unpaid).push(s);
+    // Оплатил = нет долга
+    const debt=calcDebt(s,sessions,payments,studentPayments).debtAmount;
+    (debt===0?paid:unpaid).push(s);
   });
 
   const expected=active.reduce((s,x)=>s+MONTHLY_RATES[x.frequency],0);
