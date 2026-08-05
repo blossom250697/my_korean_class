@@ -1023,8 +1023,11 @@ async def cmd_payment(msg: Message):
         await msg.answer("✅ Оплата в порядке!" if lang=="ru" else "✅ All paid!")
     else:
         fmt = f"{debt:,}".replace(",", " ")
-        text = (f"💳 Задолженность: <b>{fmt} ₩</b>\n\nПожалуйста, оплатите при возможности."
-                if lang=="ru" else f"💳 Balance: <b>{fmt} ₩</b>\n\nPlease pay when you can.")
+        text = (
+            f"💳 Задолженность: <b>{fmt} ₩</b>\n\nПожалуйста, оплатите при возможности.\n\nРеквизиты: Shinhan Bank 110-458-318987"
+            if lang=="ru" else
+            f"💳 Balance: <b>{fmt} ₩</b>\n\nPlease pay when you can.\n\nShinhan Bank 110-458-318987"
+        )
         await msg.answer(text, parse_mode="HTML")
 
 # ── Привязка существующего ученика ────────────────────────────────────────────

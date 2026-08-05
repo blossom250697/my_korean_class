@@ -87,7 +87,7 @@ PAYMENT_TERMS_TEXT = {
         "после подтверждения оплаты преподавателем.\n\n"
         "До подтверждения оплаты заявка не считается окончательной записью, "
         "а выбранное время может оставаться доступным для согласования.\n\n"
-        "Бесплатные пробные занятия не проводятся."
+        "Бесплатные пробные занятия не проводятся.\n\n""🏦 Реквизиты для оплаты:\n""Shinhan Bank\n""110-458-318987"
     ),
     "en": (
         "📌 <b>Payment Terms</b>\n\n"
@@ -96,7 +96,7 @@ PAYMENT_TERMS_TEXT = {
         "verifies your payment.\n\n"
         "Until payment is confirmed, your booking is not final and "
         "the time slot may remain available.\n\n"
-        "Free trial lessons are not offered."
+        "Free trial lessons are not offered.\n\n""🏦 Payment details:\n""Shinhan Bank\n""110-458-318987"
     ),
 }
 
