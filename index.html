@@ -308,6 +308,12 @@ function DataProvider({children}) {
     const sb=getSB(); await sb.delete('payments','id',id);
     setStudentPayments(p=>p.filter(x=>x.id!==id));
   });
+  const toggleReceipt = (id, current) => withSync(async () => {
+    const sb=getSB();
+    const val = !current;
+    await sb.update('payments',{receipt_issued:val, receipt_issued_at: val ? new Date().toISOString() : null},id);
+    setStudentPayments(p=>p.map(x=>x.id===id?{...x,receipt_issued:val}:x));
+  });
   const updateNotes = (studentId, notes) => withSync(async () => {
     const sb=getSB(); await sb.update('students',{notes},studentId);
     setStudents(p=>p.map(s=>s.id===studentId?{...s,notes}:s));
@@ -370,7 +376,7 @@ function DataProvider({children}) {
   });
 
   return (
-    <DataCtx.Provider value={{students,sessions,payments,studentPayments,loading,addStudent,updateStudent,deleteStudent,addSession,removeSession,toggleSession,setMonthPayment,updateSessionTime,addPayment,deletePayment,updateNotes,reload:loadAll}}>
+    <DataCtx.Provider value={{students,sessions,payments,studentPayments,loading,addStudent,updateStudent,deleteStudent,addSession,removeSession,toggleSession,setMonthPayment,updateSessionTime,addPayment,deletePayment,updateNotes,toggleReceipt,reload:loadAll}}>
       {children}
       {sync && (
         <div className={`sync-bar ${sync==='saving'?'':sync}`}>
@@ -425,7 +431,7 @@ function StudentForm({student, onSave, onClose}) {
 
 // ── Карточка ученика ──────────────────────────────────────────────────────────
 function StudentCard({student, onEdit, onDelete}) {
-  const {sessions, payments, studentPayments, addPayment, deletePayment, updateNotes} = useData();
+  const {sessions, payments, studentPayments, addPayment, deletePayment, updateNotes, toggleReceipt} = useData();
   const {debtAmount, debtMonths, totalPaid} = calcDebt(student, sessions, payments, studentPayments);
   const myPayments = (studentPayments||[]).filter(p=>p.student_id===student.id);
   const [showPayForm, setShowPayForm] = useState(false);
@@ -466,8 +472,12 @@ function StudentCard({student, onEdit, onDelete}) {
         <div style={{marginTop:8,padding:'7px 9px',background:'var(--green-lt)',borderRadius:7,fontSize:12}}>
           <div style={{fontWeight:700,color:'var(--green)',marginBottom:4}}>💰 Внесено: {fmt(totalPaid)}</div>
           {myPayments.map(p=>(
-            <div key={p.id} style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:2}}>
-              <span style={{color:'var(--ink2)'}}>{fmt(p.amount)}{p.note?' · '+p.note:''}</span>
+            <div key={p.id} style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:2,gap:6}}>
+              <span style={{color:'var(--ink2)',flex:1}}>{fmt(p.amount)}{p.note?' · '+p.note:''}</span>
+              <label style={{display:'flex',alignItems:'center',gap:3,cursor:'pointer',fontSize:11,color:p.receipt_issued?'var(--green)':'var(--ink3)',whiteSpace:'nowrap'}} title={p.receipt_issued?'Чек выбит':'Чек не выбит'}>
+                <input type="checkbox" checked={!!p.receipt_issued} onChange={()=>toggleReceipt(p.id,p.receipt_issued)} style={{width:13,height:13}}/>
+                🧾
+              </label>
               <button onClick={()=>deletePayment(p.id)} style={{background:'none',border:'none',color:'var(--ink3)',cursor:'pointer',fontSize:12}}>✕</button>
             </div>
           ))}
