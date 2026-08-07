@@ -299,10 +299,24 @@ function DataProvider({children}) {
   };
 
   // Платежи
-  const addPayment = (studentId, amount, note) => withSync(async () => {
-    const sb=getSB(), row={id:genId(),student_id:studentId,amount:+amount,note:note||''};
+  const addPayment = (studentId, amount, note, monthStr) => withSync(async () => {
+    const sb=getSB();
+    const row={id:genId(),student_id:studentId,amount:+amount,note:note||''};
     await sb.insert('payments',row);
     setStudentPayments(p=>[...p,row]);
+    // Для помесячной оплаты — отмечаем месяц как оплаченный
+    if(monthStr){
+      const [y,m]=monthStr.split('-').map(Number);
+      const existing=payments.find(p=>p.student_id===studentId&&p.year===y&&p.month===m);
+      if(existing){
+        await sb.update('monthly_payments',{paid:true},existing.id);
+        setPayments(p=>p.map(x=>x.id===existing.id?{...x,paid:true}:x));
+      } else {
+        const np={id:genId(),student_id:studentId,year:y,month:m,paid:true};
+        await sb.insert('monthly_payments',np);
+        setPayments(p=>[...p,np]);
+      }
+    }
   });
   const deletePayment = (id) => withSync(async () => {
     const sb=getSB(); await sb.delete('payments','id',id);
@@ -438,6 +452,7 @@ function StudentCard({student, onEdit, onDelete}) {
   const [showNotes, setShowNotes] = useState(false);
   const [payAmount, setPayAmount] = useState('');
   const [payNote, setPayNote] = useState('');
+  const [payMonth, setPayMonth] = useState(()=>{const n=new Date();return `${n.getFullYear()}-${String(n.getMonth()+1).padStart(2,'0')}`;});
   const [notesVal, setNotesVal] = useState(student.notes||'');
   return (
     <div className={`student-card ${debtAmount>0?'has-debt':''}`}>
@@ -487,11 +502,22 @@ function StudentCard({student, onEdit, onDelete}) {
       {/* Форма внесения платежа */}
       {showPayForm&&(
         <div style={{marginTop:8,display:'flex',gap:6,flexWrap:'wrap'}}>
+          {student.payment_type==='monthly'&&(
+            <input type="month" value={payMonth} onChange={e=>setPayMonth(e.target.value)}
+              style={{padding:'5px 8px',border:'1.5px solid var(--border)',borderRadius:7,fontSize:13,fontWeight:700}}/>
+          )}
           <input type="number" placeholder="Сумма ₩" value={payAmount} onChange={e=>setPayAmount(e.target.value)}
             style={{width:100,padding:'5px 8px',border:'1.5px solid var(--border)',borderRadius:7,fontSize:13}}/>
           <input type="text" placeholder="Заметка (необяз.)" value={payNote} onChange={e=>setPayNote(e.target.value)}
             style={{flex:1,minWidth:100,padding:'5px 8px',border:'1.5px solid var(--border)',borderRadius:7,fontSize:13}}/>
-          <button onClick={()=>{if(payAmount){addPayment(student.id,payAmount,payNote);setPayAmount('');setPayNote('');setShowPayForm(false);}}}
+          <button onClick={()=>{
+            if(payAmount){
+              const note = student.payment_type==='monthly'
+                ? (payNote||`оплата ${payMonth}`)
+                : payNote;
+              addPayment(student.id,payAmount,note,student.payment_type==='monthly'?payMonth:null);
+              setPayAmount('');setPayNote('');setShowPayForm(false);
+            }}}
             className="btn btn-primary" style={{padding:'5px 12px',fontSize:13}}>✓</button>
           <button onClick={()=>setShowPayForm(false)} className="btn btn-ghost" style={{padding:'5px 10px',fontSize:13}}>✕</button>
         </div>
@@ -732,23 +758,38 @@ function ReportsPage() {
     (debt===0?paid:unpaid).push(s);
   });
 
-  const expected=active.reduce((s,x)=>s+MONTHLY_RATES[x.frequency],0);
+  // Ожидается = точная сумма по каждому ученику за этот месяц
+  const expected=active.reduce((sum,s)=>{
+    if(s.payment_type==='monthly') return sum+MONTHLY_RATES[s.frequency];
+    // По занятиям: считаем проведённые занятия в этом месяце за вычетом бесплатных
+    const myS=sessions.filter(x=>x.student_id===s.id);
+    const allHeld=myS.filter(x=>x.held).sort((a,b)=>a.date.localeCompare(b.date));
+    const fc=s.has_free?(s.free_count||0):0;
+    const monthHeld=myS.filter(x=>{
+      const d=new Date(x.date);
+      return d.getFullYear()===year&&d.getMonth()+1===month&&x.held;
+    });
+    const billable=monthHeld.filter(x=>allHeld.findIndex(y=>y.id===x.id)+1>fc);
+    return sum+billable.length*sRate(s.frequency);
+  },0);
 
-  // Получено за месяц = платежи из sessions.paid + из таблицы payments за этот месяц
+  // Получено за месяц = оплаченные занятия + платежи из таблицы payments за этот месяц
   const actualMonth=active.reduce((sum,s)=>{
+    // Платежи из таблицы payments за этот месяц
+    const viaPayments=monthPaymentsSum(s.id);
     if(s.payment_type==='monthly'){
       const p=payments.find(p=>p.student_id===s.id&&p.year===year&&p.month===month);
       const viaMonthly=p?.paid?MONTHLY_RATES[s.frequency]:0;
-      const viaPayments=monthPaymentsSum(s.id);
-      return sum+Math.max(viaMonthly,viaPayments);
+      return sum+viaMonthly+viaPayments;
     }
     const myS=sessions.filter(x=>x.student_id===s.id);
     const allHeld=myS.filter(x=>x.held).sort((a,b)=>a.date.localeCompare(b.date));
     const fc=s.has_free?(s.free_count||0):0;
-    const paidS=myS.filter(x=>{const d=new Date(x.date);return d.getFullYear()===year&&d.getMonth()+1===month&&x.held&&x.paid&&allHeld.findIndex(y=>y.id===x.id)+1>fc;});
-    const viaSession=paidS.length*sRate(s.frequency);
-    const viaPayments=monthPaymentsSum(s.id);
-    return sum+Math.max(viaSession,viaPayments);
+    const paidS=myS.filter(x=>{
+      const d=new Date(x.date);
+      return d.getFullYear()===year&&d.getMonth()+1===month&&x.held&&x.paid&&allHeld.findIndex(y=>y.id===x.id)+1>fc;
+    });
+    return sum+paidS.length*sRate(s.frequency)+viaPayments;
   },0);
 
   const totalDebt=students.reduce((s,x)=>s+calcDebt(x,sessions,payments,studentPayments).debtAmount,0);
@@ -1178,25 +1219,18 @@ function SchedulePage(){
                     const freeText=free.map(w=>`${ko(toStr(w.f))}~${ko(toStr(w.t))}`).join(', ');
                     previewContent=<div style={{fontSize:10,fontWeight:700,padding:'2px 5px',borderRadius:4,background:'#EEF2FF',color:'var(--blue)',lineHeight:1.4,whiteSpace:'normal'}}>업무 대응 가능: {freeText}</div>;
                   } else {
-                    // Показываем слоты: сначала занятия учеников, потом ручные статусы
-                    const pills = slots.map(s => {
-                      const st = slotData[`${ds}_${s.id}`];
-                      const lbl = getSlotLabel(ds, s);
-                      const studentsInSlot = getStudentsForSlot(ds, s);
-                      const timeStart = lbl.split('\u2013')[0].trim();
-                      if (studentsInSlot.length > 0) {
-                        // Занятие ученика — красный приоритет
-                        const names = studentsInSlot.map(r=>r.student.name.split(' ')[0]).join(', ');
-                        return (
-                          <div key={s.id} style={{fontSize:10,fontWeight:700,padding:'2px 5px',borderRadius:4,background:'#ffe3e3',color:'var(--red)',lineHeight:1.3}}>
-                            {timeStart}<br/>{names}
-                          </div>
-                        );
-                      }
+                    // Показываем занятия учеников напрямую из sessions (без слотов)
+                    const daySessions = sessions
+                      .filter(s => normDate(s.date) === ds && s.time)
+                      .sort((a,b) => a.time.localeCompare(b.time));
+                    const student_map = {};
+                    students.forEach(s => { student_map[s.id] = s; });
+                    const pills = daySessions.map(s => {
+                      const st = student_map[s.student_id];
                       if (!st) return null;
                       return (
-                        <div key={s.id} style={{fontSize:11,fontWeight:700,padding:'2px 5px',borderRadius:4,background:st==='free'?'#d3f9d8':'#ffe3e3',color:st==='free'?'var(--green)':'var(--red)'}}>
-                          {timeStart}
+                        <div key={s.id} style={{fontSize:10,fontWeight:700,padding:'2px 5px',borderRadius:4,background:'#ffe3e3',color:'var(--red)',lineHeight:1.3}}>
+                          {s.time}<br/>{st.name.split(' ')[0]}
                         </div>
                       );
                     }).filter(Boolean);
