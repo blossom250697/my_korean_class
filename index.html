@@ -1240,7 +1240,7 @@ function SchedulePage(){
 
                 return(
                   <div key={di} onClick={()=>setPopup({day:dayObj.day,dow:dayObj.dow,ds})}
-                    style={{height:110,borderRadius:8,border:`1.5px solid ${isToday?'var(--blue)':col.border}`,padding:'7px 6px',cursor:'pointer',background:col.bg,display:'flex',flexDirection:'column',gap:4,overflow:'hidden',outline:isToday?'2.5px solid var(--blue)':undefined,outlineOffset:isToday?1:undefined,transition:'transform .12s'}}
+                    style={{minHeight:90,borderRadius:8,border:`1.5px solid ${isToday?'var(--blue)':col.border}`,padding:'7px 6px',cursor:'pointer',background:col.bg,display:'flex',flexDirection:'column',gap:3,overflow:'visible',outline:isToday?'2.5px solid var(--blue)':undefined,outlineOffset:isToday?1:undefined,transition:'transform .12s'}}
                     onMouseEnter={e=>e.currentTarget.style.transform='scale(1.02)'}
                     onMouseLeave={e=>e.currentTarget.style.transform='scale(1)'}
                   >
