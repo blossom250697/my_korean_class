@@ -1,4 +1,10 @@
 from config import SUPABASE_URL, SUPABASE_KEY
+
+MONTHLY_RATES  = {'2x': 300_000, '3x': 450_000}
+SESSION_RATES  = {'2x': 37_500,  '3x': 37_500}
+
+MONTHLY_RATES  = {'2x': 300_000, '3x': 450_000}
+SESSION_RATES  = {'2x': 37_500,  '3x': 37_500}
 from datetime import date, timedelta
 import uuid
 import httpx
