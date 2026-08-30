@@ -178,7 +178,7 @@ def days_kb(selected: list) -> InlineKeyboardMarkup:
 
 # ── Проверка окон ─────────────────────────────────────────────────────────────
 
-def get_free_slots(target_date: date, work_start: str = "10:00", work_end: str = "19:00") -> list[str]:
+def get_free_slots(target_date: date, work_start: str = "10:00", work_end: str = "22:00") -> list[str]:
     """
     Возвращает список свободных окон для записи на target_date.
     Учитывает: занятия учеников (таблица sessions) + длительность урока.

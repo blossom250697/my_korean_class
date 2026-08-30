@@ -281,7 +281,7 @@ def get_student_debt(student_id: str) -> int:
             if ym not in paid_months:
                 debt += MONTHLY_RATES[student['frequency']]
     else:
-        rate = SESSION_RATES[student['frequency']]
+        rate = SESSION_RATES.get(student['frequency'], 37500)
         for i, s in enumerate(held):
             if i >= free_count and not s['paid']:
                 debt += rate
@@ -289,12 +289,17 @@ def get_student_debt(student_id: str) -> int:
     return debt
 
 def get_students_with_debt():
+    import logging
+    log = logging.getLogger(__name__)
     students = get_all_students()
     result = []
     for s in students:
-        debt = get_student_debt(s['id'])
-        if debt > 0:
-            result.append({**s, 'debt': debt})
+        try:
+            debt = get_student_debt(s['id'])
+            if debt > 0:
+                result.append({**s, 'debt': debt})
+        except Exception as e:
+            log.warning(f"get_student_debt failed for {s.get('name')}: {e}")
     return result
 
 # ── Постоянное расписание ученика ─────────────────────────────────────────────
