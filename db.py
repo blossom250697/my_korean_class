@@ -125,6 +125,18 @@ def get_pending_application(telegram_id: int):
 # ── Занятия ───────────────────────────────────────────────────────────────────
 
 
+
+def get_sessions_for_date(date_str: str) -> list:
+    """Все занятия на конкретную дату"""
+    try:
+        return sb._get('sessions', {
+            'date': f'eq.{date_str}',
+            'select': '*',
+            'order': 'time',
+        })
+    except Exception:
+        return []
+
 def get_sessions_for_student(student_id: str):
     return sb._get('sessions', {'student_id': f'eq.{student_id}', 'select': '*', 'order': 'date'})
 
@@ -254,39 +266,52 @@ def get_active_sessions_for_student(student_id: str) -> list:
         return get_sessions_for_student(student_id)
 
 def get_student_debt(student_id: str) -> int:
-    students = sb._get('students', {'id': f'eq.{student_id}', 'select': '*'})
-    if not students: return 0
-    student = students[0]
-    sessions = get_sessions_for_student(student_id)
-    payments = sb._get('monthly_payments', {'student_id': f'eq.{student_id}', 'select': '*'})
-
-    free_count = student['free_count'] if student['has_free'] else 0
-    held = sorted([s for s in sessions if s['held']], key=lambda s: s['date'])
-    debt = 0
-    # Вычитаем внесённые частичные платежи
+    import logging
+    log = logging.getLogger(__name__)
     try:
-        student_payments = sb._get('payments', {'student_id': f'eq.{student_id}', 'select': '*'})
-        paid_amount = sum(p['amount'] for p in student_payments)
-    except Exception:
-        paid_amount = 0
+        students = sb._get('students', {'id': f'eq.{student_id}', 'select': '*'})
+        if not students: return 0
+        student = students[0]
+        sessions = get_sessions_for_student(student_id)
+        payments = sb._get('monthly_payments', {'student_id': f'eq.{student_id}', 'select': '*'})
 
-    if student['payment_type'] == 'monthly':
-        paid_months = {(p['year'], p['month']) for p in payments if p['paid']}
-        months_with = set()
-        for i, s in enumerate(held):
-            if i >= free_count:
-                y, m = int(s['date'][:4]), int(s['date'][5:7])
-                months_with.add((y, m))
-        for ym in months_with:
-            if ym not in paid_months:
-                debt += MONTHLY_RATES[student['frequency']]
-    else:
-        rate = SESSION_RATES.get(student['frequency'], 37500)
-        for i, s in enumerate(held):
-            if i >= free_count and not s['paid']:
-                debt += rate
-    debt = max(0, debt - paid_amount)
-    return debt
+        free_count = student.get('free_count', 0) if student.get('has_free') else 0
+        held = sorted([s for s in sessions if s.get('held')], key=lambda s: s['date'])
+        debt = 0
+
+        try:
+            student_payments = sb._get('payments', {'student_id': f'eq.{student_id}', 'select': '*'})
+            paid_amount = sum(int(p.get('amount', 0)) for p in student_payments)
+        except Exception as e:
+            log.warning(f"payments fetch failed: {e}")
+            paid_amount = 0
+
+        payment_type = student.get('payment_type', 'perSession')
+        frequency = student.get('frequency', '2x')
+
+        if payment_type == 'monthly':
+            paid_months = {(p['year'], p['month']) for p in payments if p.get('paid')}
+            months_with = set()
+            for i, s in enumerate(held):
+                if i >= free_count:
+                    y, m = int(s['date'][:4]), int(s['date'][5:7])
+                    months_with.add((y, m))
+            for ym in months_with:
+                if ym not in paid_months:
+                    debt += MONTHLY_RATES.get(frequency, 300000)
+        else:
+            rate = SESSION_RATES.get(frequency, 37500)
+            for i, s in enumerate(held):
+                if i >= free_count and not s.get('paid'):
+                    debt += rate
+
+        debt = max(0, debt - paid_amount)
+        log.info(f"debt for {student.get('name')}: {debt} (paid_amount={paid_amount})")
+        return debt
+    except Exception as e:
+        import logging as _log
+        _log.getLogger(__name__).error(f"get_student_debt error for {student_id}: {e}")
+        return 0
 
 def get_students_with_debt():
     import logging

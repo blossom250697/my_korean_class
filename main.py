@@ -80,10 +80,11 @@ class ApplyForm(StatesGroup):
     message  = State()
 
 class BookLesson(StatesGroup):
-    """Запись на разовое занятие существующим учеником"""
-    date_select = State()
-    time_select = State()
-    confirm     = State()
+    """Запись на занятие(я) существующим учеником"""
+    date_select  = State()
+    time_select  = State()
+    more_or_done = State()  # добавить ещё или подтвердить
+    confirm      = State()
 
 
 class RescheduleLesson(StatesGroup):
@@ -734,31 +735,56 @@ async def book_time_selected(cb: CallbackQuery, state: FSMContext):
                         else "This time is no longer available.", show_alert=True)
         return
 
-    await state.update_data(selected_time=time_str)
     days_ru = ["Пн","Вт","Ср","Чт","Пт","Сб","Вс"]
     dow = days_ru[selected_date.weekday()]
+    slot_label = f"{dow}, {fmt_date(selected_date)} {time_str}"
 
-    text = (f"📋 <b>Подтвердите запрос:</b>\n\n"
-            f"📅 {dow}, {fmt_date(selected_date)}\n"
-            f"⏰ {time_str}\n\n"
-            f"Преподаватель рассмотрит и утвердит занятие после подтверждения оплаты."
-            if lang=="ru" else
-            f"📋 <b>Confirm your request:</b>\n\n"
-            f"📅 {selected_date.strftime('%A')}, {fmt_date(selected_date)}\n"
-            f"⏰ {time_str}\n\n"
-            f"The teacher will review and confirm after payment.")
+    # Добавляем в список выбранных слотов
+    selected_slots = data.get("selected_slots", [])
+    selected_slots.append({"date": data["selected_date"], "time": time_str, "label": slot_label})
+    await state.update_data(selected_time=time_str, selected_slots=selected_slots)
 
+    # Показываем что выбрано и спрашиваем — ещё или подтвердить
+    slots_text = "\n".join(f"  • {s['label']}" for s in selected_slots)
+    text = (
+        f"✅ Добавлено: <b>{slot_label}</b>\n\n"
+        f"📋 <b>Выбранные занятия ({len(selected_slots)}):</b>\n{slots_text}\n\n"
+        f"Добавить ещё занятие или отправить запрос?"
+        if lang=="ru" else
+        f"✅ Added: <b>{slot_label}</b>\n\n"
+        f"📋 <b>Selected lessons ({len(selected_slots)}):</b>\n{slots_text}\n\n"
+        f"Add another lesson or send request?"
+    )
     kb = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="✅ Отправить запрос" if lang=="ru" else "✅ Send request",
-                              callback_data="book_confirm")],
-        [InlineKeyboardButton(text="🔙 Другое время" if lang=="ru" else "🔙 Other time",
-                              callback_data=f"bookdate_{data['selected_date']}")],
+        [InlineKeyboardButton(
+            text="➕ Добавить ещё занятие" if lang=="ru" else "➕ Add another lesson",
+            callback_data="book_add_more"
+        )],
+        [InlineKeyboardButton(
+            text=f"✅ Отправить запрос ({len(selected_slots)} зан.)" if lang=="ru"
+                 else f"✅ Send request ({len(selected_slots)} lessons)",
+            callback_data="book_confirm"
+        )],
         [InlineKeyboardButton(text="❌ Отмена" if lang=="ru" else "❌ Cancel",
                               callback_data="book_cancel")],
     ])
     await cb.message.edit_text(text, parse_mode="HTML", reply_markup=kb)
-    await state.set_state(BookLesson.confirm)
+    await state.set_state(BookLesson.more_or_done)
     await cb.answer()
+
+
+@dp.callback_query(BookLesson.more_or_done, F.data == "book_add_more")
+async def book_add_more(cb: CallbackQuery, state: FSMContext):
+    data = await state.get_data()
+    lang = data.get("lang", "ru")
+    student = db.get_student_by_telegram(cb.from_user.id)
+    if student:
+        await start_book_lesson(cb, state, student, lang)
+    await cb.answer()
+
+@dp.callback_query(BookLesson.more_or_done, F.data == "book_confirm")
+async def book_confirm_multi(cb: CallbackQuery, state: FSMContext):
+    await book_confirmed(cb, state)
 
 @dp.callback_query(BookLesson.confirm, F.data == "book_confirm")
 async def book_confirmed(cb: CallbackQuery, state: FSMContext):
@@ -766,60 +792,88 @@ async def book_confirmed(cb: CallbackQuery, state: FSMContext):
     lang = data.get("lang", "ru")
     student_id = data["student_id"]
     student_name = data["student_name"]
-    selected_date = data["selected_date"]
-    selected_time = data["selected_time"]
 
-    # Финальная проверка доступности
-    slots = get_free_slots(date.fromisoformat(selected_date))
-    if selected_time not in slots:
-        await cb.answer("Это время уже занято. Выберите другое." if lang=="ru"
-                        else "This time slot is no longer available.", show_alert=True)
+    # Берём все выбранные слоты (или один если выбран один)
+    selected_slots = data.get("selected_slots", [])
+    if not selected_slots:
+        # Fallback на одиночный слот
+        selected_slots = [{"date": data.get("selected_date",""), "time": data.get("selected_time",""),
+                           "label": f"{data.get('selected_date','')} {data.get('selected_time','')}"}]
+
+    # Финальная проверка каждого слота
+    days_ru = ["Пн","Вт","Ср","Чт","Пт","Сб","Вс"]
+    valid_slots = []
+    invalid_slots = []
+    for slot in selected_slots:
+        d = date.fromisoformat(slot["date"])
+        slots_available = get_free_slots(d)
+        if slot["time"] in slots_available:
+            valid_slots.append(slot)
+        else:
+            invalid_slots.append(slot)
+
+    if not valid_slots:
+        await cb.answer(
+            "Все выбранные слоты уже заняты." if lang=="ru"
+            else "All selected slots are taken.", show_alert=True)
         await state.clear()
         return
 
-    # Сохраняем заявку с данными занятия
-    app_id = str(uuid.uuid4())
-    req_id = app_id.replace("-", "")
-    db.create_application({
-        "id":           app_id,
-        "telegram_id":  cb.from_user.id,
-        "name":         student_name,
-        "level":        "",
-        "frequency":    selected_time,    # время
-        "preferred_time": f"{selected_date} {selected_time}",
-        "message":      student_id,       # student_id
-        "lang":         lang,
-        "status":       "new",
-        "username":     str(cb.from_user.id),
-    })
+    # Создаём заявки для каждого валидного слота
+    notif_lines = []
+    buttons = []
+    for slot in valid_slots:
+        app_id = str(uuid.uuid4())
+        req_id = app_id.replace("-", "")
+        d = date.fromisoformat(slot["date"])
+        dow = days_ru[d.weekday()]
+        date_fmt = f"{dow}, {fmt_date(d)}"
+
+        db.create_application({
+            "id":             app_id,
+            "telegram_id":    cb.from_user.id,
+            "name":           student_name,
+            "level":          "",
+            "frequency":      slot["time"],
+            "preferred_time": f"{slot['date']} {slot['time']}",
+            "message":        student_id,
+            "lang":           lang,
+            "status":         "new",
+            "username":       str(cb.from_user.id),
+        })
+        notif_lines.append(f"  📅 {date_fmt} ⏰ {slot['time']}")
+        buttons.append([
+            InlineKeyboardButton(
+                text=f"✅ {date_fmt} {slot['time']}",
+                callback_data=f"apl_{req_id}"
+            ),
+            InlineKeyboardButton(text="❌", callback_data=f"rjl_{req_id}"),
+        ])
 
     # Подтверждение ученику
-    days_ru = ["Пн","Вт","Ср","Чт","Пт","Сб","Вс"]
-    d = date.fromisoformat(selected_date)
-    dow = days_ru[d.weekday()]
-    date_fmt = f"{dow}, {fmt_date(d)}"
+    slots_text = "\n".join(notif_lines)
+    warn = ""
+    if invalid_slots:
+        warn = ("\n\n⚠️ Некоторые слоты уже заняты и не были включены."
+                if lang=="ru" else "\n\n⚠️ Some slots were already taken and excluded.")
 
     await cb.message.edit_text(
-        f"✅ Запрос отправлен!\n\n📅 {date_fmt}\n⏰ {selected_time}\n\n"
+        f"✅ Запрос отправлен!\n\n"
+        f"📋 Выбранные занятия ({len(valid_slots)}):\n{slots_text}{warn}\n\n"
         f"Ожидайте подтверждения от преподавателя."
         if lang=="ru" else
-        f"✅ Request sent!\n\n📅 {date_fmt}\n⏰ {selected_time}\n\n"
+        f"✅ Request sent!\n\n"
+        f"📋 Selected lessons ({len(valid_slots)}):\n{slots_text}{warn}\n\n"
         f"Please wait for the teacher's confirmation."
     )
 
-    # Уведомление преподавателю — ОДНА кнопка, одно нажатие
+    # Уведомление преподавателю
     notif = (
-        f"📬 <b>Запрос на занятие!</b>\n\n"
-        f"👤 {student_name}\n"
-        f"📅 {date_fmt}\n"
-        f"⏰ {selected_time}"
+        f"📬 <b>Запрос на {'занятие' if len(valid_slots)==1 else str(len(valid_slots))+' занятия'}!</b>\n\n"
+        f"👤 {student_name}\n{slots_text}"
     )
-    kb = InlineKeyboardMarkup(inline_keyboard=[[
-        InlineKeyboardButton(text=f"✅ Утвердить — {date_fmt} {selected_time}",
-                             callback_data=f"apl_{req_id}"),
-        InlineKeyboardButton(text="❌ Отклонить", callback_data=f"rjl_{req_id}"),
-    ]])
-    await bot.send_message(TUTOR_ID, notif, parse_mode="HTML", reply_markup=kb)
+    await bot.send_message(TUTOR_ID, notif, parse_mode="HTML",
+                           reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons))
     await state.clear()
     await cb.answer()
 
